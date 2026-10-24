@@ -1,8 +1,7 @@
 # Conventions
 
 ## Workflow
-- A PR may merge only if `python -m pytest -q --slow` passes (tests run with `INCPANDAS_VERIFY=1`).
-  Plain `python -m pytest -q` is the fast suite for editing; `--slow` is the merge gate.
+- A PR may merge only if `python -m pytest -q` passes (tests run with `INCPANDAS_VERIFY=1`).
 
 ## Correctness
 - If unsure, fall back to pandas. Never return a wrong result.
@@ -16,11 +15,9 @@ Tell the other person before changing any of these:
 ## Tests
 - Every new operation needs an entry in `tests/fuzz_ops.py` once that file exists.
 - The suite is parallel by default (`-n auto`, from `pyproject.toml`). Use `-n0` to debug one test.
-- Two depths: `pytest` (fast, ~20s) runs every op in `fuzz_ops.OPS` against one mutation mode
-  each, round-robin; `pytest --slow` (~40s) runs the full cross product plus anything marked
-  `@pytest.mark.slow`. Adding an op to `OPS` therefore gets you one fast variant automatically
-  and full coverage under `--slow` -- no bookkeeping needed. Mark a genuinely slow new test
-  `@pytest.mark.slow` to keep it out of the fast suite.
+- `pytest` runs everything (~40s): all 963 tests, the full fuzz cross product. `pytest --fast`
+  (~20s) thins that to one mutation mode per op, round-robin, for a quick check while editing;
+  it is not the merge gate. Adding an op to `OPS` needs no bookkeeping either way.
 
 ## Local setup
 - `py -3.10 -m venv .venv && .venv/Scripts/python.exe -m pip install -e ".[dev]"`, then
@@ -47,12 +44,11 @@ your own heading; delete it once the other person has acted on it.
   returns True *only* on pandas 3.1, so the fully incremental inner-merge branch runs on no
   other version; CI now includes a 3.1 row so both sides of that branch are covered.
 
-- 2026-10-24: the suite was 7 minutes, so it now has two depths, both in `tests/conftest.py`:
-  `pytest` is the fast one (~20s) and `pytest --slow` is everything (~40s). Default runs keep
-  one mutation mode per op, picked round-robin, so all 81 ops and all modes still appear --
-  verified 81/81 ops in both fuzz files. Nothing is needed from you when you add an op. Please
-  run `--slow` before pushing, since that is the merge gate; `pyproject.toml` also turns on
-  `-n auto`, so add `-n0` when you want readable output for a single test.
+- 2026-10-24: the suite was 7 minutes; `pyproject.toml` now turns on `-n auto`, which brings
+  the whole thing to ~40s, so `python -m pytest -q` still means everything and stays the merge
+  gate -- no change to your habits. Add `-n0` when you want readable output for a single test.
+  `--fast` (~20s) thins the fuzz cross product to one mode per op for a quick check while
+  editing; `--slow` is accepted and does nothing, in case you picked it up from an earlier note.
 
 ### From A to B
 - (none yet)

@@ -11,10 +11,6 @@ jobs:
   pytest:
     name: py${{ matrix.python }} / pandas ${{ matrix.pandas }}
     runs-on: ubuntu-latest
-    env:
-      # A push to a feature branch gets the fast suite for a quick signal. Anything that
-      # gates main -- a pull request, a push to main, a manual run -- gets all of it.
-      SLOW: ${{ (github.event_name == 'push' && github.ref != 'refs/heads/main') && '' || '--slow' }}
     strategy:
       fail-fast: false
       matrix:
@@ -56,4 +52,4 @@ jobs:
       # conftest.py sets INCPANDAS_VERIFY=1, so every materialisation is checked
       # against a from-scratch plain pandas run.
       - name: Test
-        run: python -m pytest -q $SLOW
+        run: python -m pytest -q

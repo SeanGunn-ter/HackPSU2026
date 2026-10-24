@@ -2,17 +2,17 @@
 
 Every test runs in its own empty directory with its own cache and INCPANDAS_VERIFY=1.
 
-The two fuzz files are a cross product: every operation in `fuzz_ops.OPS` against every
-right-table mutation mode (test_fuzz_ops) and every file mutation mode (test_fuzz_mutations).
-All of it takes about seven minutes, which is too slow to run on every edit, so by default
-each operation runs against ONE mode, picked round-robin so that every operation and every
-mode still appears in the run. `--slow` restores the full cross product.
+Everything runs by default: the two fuzz files are a cross product of every operation in
+`fuzz_ops.OPS` against every right-table mutation mode (test_fuzz_ops) and every file
+mutation mode (test_fuzz_mutations), and with `-n auto` the whole suite is about 40 seconds.
 
-    python -m pytest -q              # fast: every op once per fuzz file, ~1.5 min
-    python -m pytest -q --slow       # comprehensive: the full cross product, ~7 min
-    python -m pytest -q --slow -n auto   # the same, in parallel, if pytest-xdist is installed
+    python -m pytest -q          # everything, ~40s
+    python -m pytest -q --fast   # one mode per operation, ~20s
+    python -m pytest -q -n0      # serially, for readable output while debugging one test
 
-Tests marked `@pytest.mark.slow` also run only under `--slow`.
+`--fast` keeps one mode per operation, picked round-robin so that every operation and every
+mode still appears, and drops anything marked `@pytest.mark.slow`. It exists for when the
+cross product grows again; the full run is the merge gate.
 """
 import pytest
 
@@ -27,13 +27,15 @@ def _isolated(tmp_path, monkeypatch):
 
 
 def pytest_addoption(parser):
+    parser.addoption("--fast", action="store_true", default=False,
+                     help="thin the fuzz cross product to one mode per operation and skip "
+                          "tests marked slow; the default run is everything")
     parser.addoption("--slow", action="store_true", default=False,
-                     help="run the comprehensive suite: the full fuzz cross product and any "
-                          "test marked slow (minutes, not seconds)")
+                     help="no-op, kept so the old comprehensive-run command still works")
 
 
 def pytest_configure(config):
-    config.addinivalue_line("markers", "slow: only runs under --slow (comprehensive suite)")
+    config.addinivalue_line("markers", "slow: skipped under --fast")
 
 
 def _fuzz_key(item):
@@ -48,8 +50,8 @@ def _fuzz_key(item):
 
 
 def pytest_collection_modifyitems(config, items):
-    """Without --slow, thin the fuzz cross product to one mode per operation."""
-    if config.getoption("--slow"):
+    """Under --fast, thin the fuzz cross product to one mode per operation."""
+    if not config.getoption("--fast"):
         return
 
     # dict keys keep collection order (the parametrize order), so this is deterministic:
@@ -91,6 +93,6 @@ def pytest_collection_modifyitems(config, items):
 def pytest_report_collectionfinish(config, items):
     n = getattr(config, "_fast_deselected", 0)
     if n:
-        return (f"fast suite: {len(items)} tests, {n} fuzz variants held back "
-                f"(every operation still runs once per fuzz file) -- use --slow for all of them")
+        return (f"--fast: {len(items)} tests, {n} fuzz variants held back "
+                f"(every operation still runs once per fuzz file) -- drop --fast for all of them")
     return None

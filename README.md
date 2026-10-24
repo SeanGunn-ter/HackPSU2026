@@ -74,14 +74,14 @@ Known limits: state stores full outputs (disk/RAM scale with data); a file whose
 ## Running the tests
 ```
 pip install -e ".[dev]"
-pytest           # fast: ~20s, every registered operation exercised
-pytest --slow    # comprehensive: the full fuzz cross product, ~40s
-pytest -n0       # serially, for readable output while debugging one test
+pytest          # everything, ~40s
+pytest --fast   # one mode per operation, ~20s
+pytest -n0      # serially, for readable output while debugging one test
 ```
 The fuzz suite is a cross product of every operation in `tests/fuzz_ops.py` against every
-file-mutation and right-table-mutation mode. The default run keeps one mode per operation,
-chosen round-robin, so every operation and every mode appears but not every pairing (396 of
-963 tests). `--slow` runs all of it, and also any test marked `@pytest.mark.slow`.
+file-mutation and right-table-mutation mode, and all 963 tests run by default. `--fast` keeps
+one mode per operation, chosen round-robin so every operation and every mode still appears
+but not every pairing (396 tests), and skips anything marked `@pytest.mark.slow`.
 
-CI runs the fast suite on pushes to a feature branch and the comprehensive suite on anything
-that gates `main`, across py3.10/3.12 x pandas 2.1/2.2/3.0/3.1.
+CI runs the full suite on every push and pull request, across py3.10/3.12 x pandas
+2.1/2.2/3.0/3.1.
