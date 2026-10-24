@@ -113,7 +113,9 @@ class GroupAgg(Node):
     def _eligible(self, d, spec):
         for c in spec["cols"]:
             dt = d[c].dtype
-            if not (isinstance(dt, np.dtype) and dt.kind in "iuf"):
+            # float32/float16 are left to pandas: it keeps their width, so a float64 partial
+            # total would give a different dtype (mean) or different rounding (sum)
+            if not (isinstance(dt, np.dtype) and (dt.kind in "iu" or dt == np.float64)):
                 return False
         return not any(isinstance(d[k].dtype, pd.CategoricalDtype) for k in self.keys)
 

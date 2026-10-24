@@ -45,6 +45,20 @@ def merge_note(lazy):
     return engine.last_run()[lazy._node.sig]
 
 
+def keeps_order():
+    from incpandas.merge import _inner_keeps_left_order
+    return _inner_keeps_left_order()
+
+
+def assert_delta(lazy, how, n, dup_right=True):
+    """Expect the merge to have processed just n new rows. An inner merge against duplicate
+    right keys is recomputed in full on pandas versions that order it differently (merge.py)."""
+    if how == "inner" and dup_right and not keeps_order():
+        assert merge_note(lazy)[0] == "full"
+    else:
+        assert merge_note(lazy) == ("incremental", n)
+
+
 HOWS = ["inner", "left"]
 SHAPES = {
     "k": lambda m, d, r, how: d.merge(r, how=how, on="k"),
@@ -58,19 +72,21 @@ SHAPES = {
 def test_left_append_is_incremental_and_exact(how, shape):
     make = lambda m, d, r: SHAPES[shape](m, d, r, how)
     left(), right()
+    dup = shape != "k_list"                                 # (k, a) pairs on the right are unique
     lazy, _ = run(make)
     assert type(lazy._node).__name__ == "Merge" and lazy._node.fast
     assert merge_note(lazy)[0] == "full"
     lazy, _ = run(make)                                    # nothing changed
-    assert merge_note(lazy) == ("incremental", 0)
+    assert_delta(lazy, how, 0, dup)
     write("d.csv", LEFT_HEADER, LEFT2)                     # new rows on the left
     lazy, got = run(make)
-    assert merge_note(lazy) == ("incremental", len(LEFT2))  # only the delta was processed
-    assert {m for m, _ in engine.last_run().values()} == {"incremental"}
+    assert_delta(lazy, how, len(LEFT2), dup)                    # only the delta was processed
+    if how == "left" or keeps_order() or not dup:
+        assert {m for m, _ in engine.last_run().values()} == {"incremental"}
     assert isinstance(got.index, (plain.RangeIndex, plain.Index)) and list(got.index) == list(range(len(got)))
     write("d.csv", LEFT_HEADER, [("y", 1, 0.5)] * 3)       # and again
     lazy, _ = run(make)
-    assert merge_note(lazy) == ("incremental", 3)
+    assert_delta(lazy, how, 3, dup)
 
 
 @pytest.mark.parametrize("how", HOWS)
@@ -85,7 +101,7 @@ def test_right_changes_recompute_in_full(how):
     assert merge_note(lazy)[0] == "full"
     write("d.csv", LEFT_HEADER, [("w", 8, 1.0)])                         # left appended after
     lazy, _ = run(make)
-    assert merge_note(lazy) == ("incremental", 1)
+    assert_delta(lazy, how, 1)
     lines = open("r.csv").read().splitlines()                            # right edited in place
     lines[2] = "y,99,edited"
     open("r.csv", "w").write("\n".join(lines) + "\n")
@@ -96,7 +112,7 @@ def test_right_changes_recompute_in_full(how):
     assert merge_note(lazy)[0] == "full"
     write("d.csv", LEFT_HEADER, [("x", 2, 2.0)])
     lazy, _ = run(make)
-    assert merge_note(lazy) == ("incremental", 1)
+    assert_delta(lazy, how, 1, dup_right=False)             # right keys are unique again
 
 
 @pytest.mark.parametrize("how", HOWS)
@@ -120,7 +136,7 @@ def test_duplicate_right_keys_keep_pandas_order():
         extra = [("zz", 6, 6.0)] if how == "inner" else []      # a left no-match flips v to float
         write("d.csv", LEFT_HEADER, [("x", 4, 4.0), ("y", 5, 5.0)] + extra)
         lazy, got = run(make)
-        assert merge_note(lazy) == ("incremental", 2 + len(extra))
+        assert_delta(lazy, how, 2 + len(extra))
         left([("y", 1, 1.0), ("x", 2, 2.0), ("y", 3, 3.0)])
 
 
@@ -160,7 +176,7 @@ def test_empty_delta_and_no_match_delta_keep_dtypes():
     run(make)
     write("d.csv", LEFT_HEADER, [("nomatch", 1, 1.0), ("nope", 2, 2.0)])   # inner: delta merges to nothing
     lazy, got = run(make)
-    assert merge_note(lazy) == ("incremental", 2)
+    assert_delta(lazy, "inner", 2)
     write("d.csv", LEFT_HEADER, [("x", 9, 9.0)])
     run(make)
 
@@ -173,7 +189,7 @@ def test_nan_keys_match_like_pandas():
         run(make)
         write("d.csv", LEFT_HEADER, [("", 5, 5.0), ("x", 6, 6.0)])
         lazy, got = run(make)
-        assert merge_note(lazy) == ("incremental", 2)
+        assert_delta(lazy, how, 2)
         left([("x", 1, 1.0), ("", 2, 2.0)])
 
 
@@ -251,7 +267,8 @@ def test_chain_filter_assign_groupby():
     run(make)
     write("d.csv", LEFT_HEADER, LEFT2)
     lazy, _ = run(make)
-    assert {m for m, _ in engine.last_run().values()} == {"incremental"}
+    if keeps_order():       # the inner merge against duplicate right keys is recomputed otherwise
+        assert {m for m, _ in engine.last_run().values()} == {"incremental"}
     write("r.csv", RIGHT_HEADER, [("q", 1, "z")])
     run(make)
     write("d.csv", LEFT_HEADER, LEFT2)
@@ -279,3 +296,42 @@ def test_original_frames_unchanged():
     d, r = pd.read_csv("d.csv"), pd.read_csv("r.csv")
     d.merge(r, on="k")
     assert d._node.columns == ["k", "a", "b"] and r._node.columns == ["k", "v", "w"]
+
+
+# Left keys x y z w y q x, right keys x y y z n: on pandas < 3.1 a full inner merge orders
+# rows differently from merging the left side in two chunks (see merge.py).
+PROBE_LEFT = [(k, i, float(i)) for i, k in enumerate("xyzwyqx")]
+PROBE_RIGHT = [(k, i, "p") for i, k in enumerate("xyyzn")]
+
+
+def test_inner_order_probe_matches_plain_pandas_example():
+    from incpandas.merge import _inner_keeps_left_order
+    l = plain.DataFrame({"k": list("xyzwyqx"), "i": range(7)})
+    r = plain.DataFrame({"k": list("xyyzn"), "j": range(5)})
+    full = l.merge(r, on="k")
+    chunked = plain.concat([l.iloc[:4].merge(r, on="k"), l.iloc[4:].merge(r, on="k")],
+                           ignore_index=True)
+    same_order = full.reset_index(drop=True).equals(chunked)
+    assert _inner_keeps_left_order() is same_order
+
+
+@pytest.mark.parametrize("how", HOWS)
+def test_incremental_merge_equals_pandas_for_order_problem_case(how):
+    make = lambda m, d, r: d.merge(r, how=how, on="k")
+    left(PROBE_LEFT[:4]), right(PROBE_RIGHT)
+    run(make)
+    write("d.csv", LEFT_HEADER, PROBE_LEFT[4:])           # appended left rows
+    lazy, _ = run(make)                                    # run() asserts equality with pandas
+    from incpandas.merge import _inner_keeps_left_order
+    assert_delta(lazy, how, 3)                             # inner + duplicate right keys: full
+    write("d.csv", LEFT_HEADER, [("y", 9, 9.0), ("n", 10, 10.0), ("x", 11, 11.0)])
+    run(make)
+
+
+def test_inner_merge_with_unique_right_keys_stays_incremental():
+    make = lambda m, d, r: d.merge(r, on="k")
+    left(PROBE_LEFT[:4]), right([("x", 1, "a"), ("y", 2, "b"), ("z", 3, "c"), ("n", 4, "d")])
+    run(make)
+    write("d.csv", LEFT_HEADER, PROBE_LEFT[4:])
+    lazy, _ = run(make)
+    assert merge_note(lazy) == ("incremental", 3)

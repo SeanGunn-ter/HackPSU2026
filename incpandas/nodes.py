@@ -56,7 +56,7 @@ class Mem(Node):
 
     def stream(self, ctx):
         ctx.note(self, "fallback", len(self.df))
-        return self.df, True
+        return self.df.copy(), True
 
     def replay(self, rep):
         return self.df.copy()

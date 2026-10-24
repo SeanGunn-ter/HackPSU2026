@@ -24,6 +24,11 @@ def _plain_right(df):
     return plain.read_csv("r.csv")
 
 
+def _f32_read(df):
+    """`df` (the frame from read_csv("d.csv")) with column b read as float32."""
+    return _mod(df).read_csv("d.csv", dtype={"b": "float32"})
+
+
 def _mod(df):
     return plain if isinstance(df, plain.DataFrame) else pd
 
@@ -57,6 +62,11 @@ OPS = {
        for f in ("sum", "mean", "min", "max", "count")},
     # boolean formulas: sum/count/mean are incremental, min/max fall back to pandas
     **{f"bool_{f}": (lambda df, f=f: getattr(df.a > 3, f)()) for f in ("sum", "count", "mean", "min", "max")},
+    # groupby on float32 values: pandas keeps float32, so these must match it exactly
+    **{f"groupby_f32_dtype_{f}": (lambda df, f=f: getattr(_f32_read(df).groupby("k")[["b"]], f)())
+       for f in ("sum", "mean", "min", "max", "count")},
+    **{f"groupby_f32_astype_{f}": (lambda df, f=f: getattr(df.astype({"b": "float32"}).groupby("k")[["a", "b"]], f)())
+       for f in ("sum", "mean", "min", "max", "count")},
     # merge (merge.py): new rows on the left are incremental
     "merge_inner_k": lambda df: df.merge(_right(df), on="k"),
     "merge_left_k": lambda df: df.merge(_right(df), how="left", on="k"),
