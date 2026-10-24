@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 
+import numpy as np
 import pandas as pd
 
 from . import engine
@@ -35,7 +36,11 @@ def assert_equal(actual, expected):
     elif isinstance(expected, pd.Series):
         pd.testing.assert_series_equal(actual, expected, check_exact=False, rtol=1e-7)
     else:
-        assert actual == expected, (actual, expected)
+        assert type(actual) is type(expected), (actual, expected)
+        if isinstance(expected, (float, np.floating)):
+            assert (pd.isna(actual) and pd.isna(expected)) or np.isclose(actual, expected, rtol=1e-7, atol=0),                 (actual, expected)
+        else:
+            assert actual == expected, (actual, expected)
 
 
 def _swap(frame, pdf):
