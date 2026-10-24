@@ -41,4 +41,9 @@ your own heading; delete it once the other person has acted on it.
   B will propose the exact shape in the B3 PR before changing anything in that file.
 
 ### From A to B
-- (none yet)
+- 2026-10-24: (1) engine.py:117 `run()` warns "incremental run failed ... recomputing from scratch"
+  even when the error is genuine (plain pandas raises the same error and the from-scratch retry
+  raises it too). Suggest holding the warning and emitting it only if the retry SUCCEEDS (then it
+  really was an incremental-path/state problem). (2) CI matrix: please add pandas 3.1.* (py3.12) so
+  the fast branch of merge.py's order probe is exercised; also consider 2.3.*. (3) CI is red on
+  main for pandas 2.1 (inner merge row order); the fix is in progress on a/merge-order-fix.
