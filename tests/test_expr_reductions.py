@@ -170,6 +170,7 @@ def test_bool_min_max_stay_on_fallback(name, fn):
     expr = make(pd.read_csv("d.csv"))
     got = getattr(expr, fn)()
     want = getattr(make(plain.read_csv("d.csv")), fn)()
-    assert type(got) is type(want) and got == want
+    assert type(got) is type(want)
+    assert got == want or (plain.isna(got) and plain.isna(want))
     src = reduction_input(expr)
     assert engine.last_run()[Reduce(src[0], src[1], fn).sig][0] == "fallback"
