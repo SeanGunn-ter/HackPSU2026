@@ -1,9 +1,7 @@
 # Conventions
 
 ## Workflow
-- Branches are `a/<topic>` or `b/<topic>`, cut from `main`. Keep PRs small (<300 lines).
 - A PR may merge only if `python -m pytest -q` passes (tests run with `INCPANDAS_VERIFY=1`).
-- Never add Co-Authored-By, "Generated with Claude", or session links to commits or PR text.
 
 ## Correctness
 - If unsure, fall back to pandas. Never return a wrong result.
