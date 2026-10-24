@@ -18,6 +18,9 @@ from .source import Source
 
 __version__ = "0.1.0"
 
+__all__ = ["read_csv", "check", "LazyFrame", "LazyGroupBy", "Source", "engine",
+           "fallback_log", "last_run", "unwrap", "__version__"]
+
 _CSV_KW = {"sep", "delimiter", "usecols", "dtype", "na_values", "keep_default_na",
            "encoding", "quotechar", "decimal"}
 _COMPRESSED = (".gz", ".bz2", ".zip", ".xz", ".zst", ".tar", ".tgz")

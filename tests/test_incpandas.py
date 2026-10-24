@@ -1,6 +1,5 @@
 import numpy as np
 import pandas as plain
-import pytest
 
 import incpandas as pd
 from incpandas import engine
