@@ -11,8 +11,6 @@ import uuid
 
 import pandas as pd
 
-from .expr import Expr
-
 
 def _h(*parts):
     return hashlib.sha1("\x00".join(map(str, parts)).encode()).hexdigest()
