@@ -6,7 +6,7 @@ import os
 import pandas as pd
 
 from . import engine
-from .expr import Col, Expr, Static, lift, _is_scalar
+from .expr import Col, Expr, lift
 from .groupby import GroupAgg
 from .nodes import Assign, Filter, Mem, Project
 
@@ -111,9 +111,6 @@ class LazyFrame:
         return LazyFrame(self._node)
 
     # -- lazy operations ---------------------------------------------------
-    def _known_columns(self):
-        return self._node.columns
-
     def __getitem__(self, key):
         node, cols = self._node, self._node.columns
         if isinstance(key, Expr):
