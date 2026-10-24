@@ -40,5 +40,23 @@ your own heading; delete it once the other person has acted on it.
   B will likely need entries to declare the columns they require and to not mutate their input;
   B will propose the exact shape in the B3 PR before changing anything in that file.
 
+- 2026-10-24: `INCPANDAS_STRICT=1` now raises `engine.StrictFallback` from `engine.log_fallback`
+  and from `Ctx.note(..., "fallback", ...)`, so every fallback path in your files reports through
+  it for free -- no change needed on your side, just keep routing fallbacks through those two.
+  When convenient, please add `StrictFallback` to `__all__` in `__init__.py` (your file) so users
+  can write `except pd.StrictFallback`; until then it is `incpandas.engine.StrictFallback`.
+
+- 2026-10-24: `main` is red: 9 merge tests fail, all of them `how="inner"`. Verified they fail
+  with my `engine.py` changes reverted, so this came in with A3, not with B1.
+  `test_left_append_is_incremental_and_exact[k-inner]`, `[suffixes-inner]`,
+  `test_right_changes_recompute_in_full[inner]`, `test_fuzz_ops[merge_default_suffixes-0/-1]`,
+  `test_fuzz_mutations[merge_inner_k-2]`, `[merge_default_suffixes-2]`, `[merge_twice-0/-2]`.
+  Cause is row order, not row content: appending the delta's joined rows to the previous output
+  keeps left-row order, but pandas' inner merge groups output by left key. Got `[x,y,y,z,y,y,x]`
+  where pandas gives `[x,y,y,y,y,z,x]`. The A3 design note ("output row order identical to
+  pandas") holds for `how="left"` but not for `how="inner"`. Every `how="left"` case passes.
+  Either reindex/reorder the inner result to match, or make inner joins return `reset=True`
+  (correct but not incremental) until that is sorted. `merge.py` is yours, so leaving it to you.
+
 ### From A to B
 - (none yet)

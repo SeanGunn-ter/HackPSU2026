@@ -3,6 +3,10 @@
 State lives in one pickle per plan fingerprint (`<cache_dir>/<sig>.pkl`) and is written
 atomically, so a crash can't leave sources and aggregates out of sync. If anything about
 the saved state looks off, or the incremental path raises, we recompute from scratch.
+
+Two environment variables make a run observable:
+`INCPANDAS_LOG=1` prints one summary line per run, `INCPANDAS_STRICT=1` raises
+`StrictFallback` instead of quietly handing work to pandas.
 """
 from __future__ import annotations
 
@@ -10,6 +14,7 @@ import logging
 import os
 import pickle
 import warnings
+from collections import Counter
 
 import pandas as pd
 
@@ -22,6 +27,15 @@ fallback_log: list = []   # names of pandas calls that ran eagerly in real panda
 _last: dict = {}          # node sig -> (mode, rows) from the most recent run
 
 
+class StrictFallback(RuntimeError):
+    """Raised in place of a fallback to pandas when INCPANDAS_STRICT=1."""
+
+
+def _on(name):
+    """True when an INCPANDAS_* flag is set to anything other than "" or "0"."""
+    return os.environ.get(name, "") not in ("", "0")
+
+
 def cache_dir():
     return os.environ.get("INCPANDAS_CACHE", ".incpandas_cache")
 
@@ -31,6 +45,8 @@ def last_run():
 
 
 def log_fallback(what):
+    if _on("INCPANDAS_STRICT"):
+        raise StrictFallback(f"{what} ran in pandas (INCPANDAS_STRICT=1)")
     fallback_log.append(what)
     log.info("incpandas: falling back to pandas for %s", what)
 
@@ -56,6 +72,10 @@ class Ctx:
         self.new_nodes.pop(node.sig, None)
 
     def note(self, node, mode, rows):
+        # A Mem node holds a frame that was already materialised, so whatever produced it
+        # has reported its own fallback; don't raise a second time for it.
+        if mode == "fallback" and node.kind != "Mem" and _on("INCPANDAS_STRICT"):
+            raise StrictFallback(f"{node.label()} ran in pandas (INCPANDAS_STRICT=1)")
         self.notes[node.sig] = (mode, rows)
 
     def stream(self, node):
@@ -103,6 +123,22 @@ def _save(sig, ctx):
     os.replace(tmp, path)
 
 
+def summary(ctx):
+    """One line describing a finished run: rows fed in, rows not re-read, node modes."""
+    processed = skipped = 0
+    for sig, st in ctx.new_nodes.items():
+        if "nrows" not in st:            # only sources keep a row count
+            continue
+        total = st["nrows"]
+        rows = ctx.notes.get(sig, ("full", total))[1]
+        processed += rows
+        skipped += max(total - rows, 0)
+    modes = Counter(mode for mode, _ in ctx.notes.values())
+    detail = ", ".join(f"{n} {mode}" for mode, n in sorted(modes.items()))
+    line = f"incpandas: processed {processed:,} new rows, skipped {skipped:,}"
+    return f"{line} ({detail})" if detail else line
+
+
 def run(sig, fn):
     """Run `fn(ctx)` incrementally against the state for `sig`; retry from scratch on trouble."""
     state = _load(sig)
@@ -111,7 +147,7 @@ def run(sig, fn):
         try:
             out = fn(ctx)
         except Exception as e:
-            if st is None:
+            if st is None or isinstance(e, StrictFallback):
                 raise
             if not isinstance(e, StateMismatch):
                 warnings.warn(f"incpandas: incremental run failed ({e!r}); recomputing from scratch")
@@ -123,6 +159,8 @@ def run(sig, fn):
                 warnings.warn(f"incpandas: could not save state ({e})")
         _last.clear()
         _last.update(ctx.notes)
+        if _on("INCPANDAS_LOG"):
+            print(summary(ctx))
         return out
 
 

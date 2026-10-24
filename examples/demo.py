@@ -10,6 +10,7 @@ import numpy as np
 
 os.chdir(tempfile.mkdtemp())
 os.environ["INCPANDAS_CACHE"] = ".cache"
+os.environ["INCPANDAS_LOG"] = "1"      # one summary line per run
 
 import incpandas as pd   # <- the only change from a plain pandas script
 import pandas

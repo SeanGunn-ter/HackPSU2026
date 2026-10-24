@@ -50,9 +50,24 @@ The row-wise case is slower than groupby because it loads and re-saves the full 
 * `INCPANDAS_VERIFY=1` does that on every materialisation (the test suite runs this way).
 * Float sums/means are compared with a tiny tolerance: merging partial sums can differ from pandas' single pass in the last bits. Integers are exact.
 
+## Seeing what a run did
+* `INCPANDAS_LOG=1` prints one line per run:
+
+  ```
+  incpandas: processed 1,000 new rows, skipped 2,000,000 (4 incremental)
+  ```
+
+  `processed` counts the CSV rows actually parsed this run, `skipped` the rows that were not
+  re-read, and the tail counts nodes by mode (`incremental`, `full`, `fallback`).
+* `INCPANDAS_STRICT=1` raises `incpandas.engine.StrictFallback` instead of quietly handing work
+  to pandas, for both kinds of fallback: an unsupported call (`df.a.map(...)`, `sort_values`) and
+  a planned node that declines to run incrementally (`df.k.sum()` over strings). Useful in CI to
+  assert a pipeline really is incremental end to end. Recomputing from scratch after a file edit
+  is not a fallback and does not raise.
+
 ## Status vs scope
 MVP done: append detection, column math + filters, groupby sum/count/mean, fallback, persistent state, correctness check. Also done: min/max, text plan view.
-Not done: `merge` with a new-rows side, graph visualisation (text `explain()` only), edited/deleted rows via key column.
+Not done: graph visualisation (text `explain()` only), edited/deleted rows via key column.
 
 Known limits: state stores full outputs (disk/RAM scale with data); a file whose header contains quotes is always fully re-read; the whole file is read once per run to hash it (I/O only, no parsing).
 
