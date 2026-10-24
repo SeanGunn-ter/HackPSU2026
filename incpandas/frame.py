@@ -9,6 +9,7 @@ import pandas as pd
 from . import engine
 from .expr import Col, Expr, _is_scalar, lift
 from .groupby import GroupAgg
+from .merge import Merge, plan_merge
 from .nodes import Assign, Filter, Mem, Project
 from .rowwise import AsType, DropNa, Drop, FillNa, Rename
 
@@ -280,6 +281,19 @@ class LazyFrame:
                 val = val(frame)
             frame[key] = val      # Assign when columns are known, else pandas fallback
         return frame
+
+    def merge(self, right, how="inner", on=None, **kwargs):
+        """Incremental for how=inner/left on named key columns of two lazy frames."""
+        kw = dict(kwargs)
+        suffixes = kw.pop("suffixes", ("_x", "_y"))
+        if kw.pop("sort", False) is not False:
+            kw["sort"] = True
+        if isinstance(right, LazyFrame) and not kw and isinstance(how, str):
+            cols = plan_merge(self._node.columns, right._node.columns, how, on, suffixes)
+            if cols is not None:
+                return LazyFrame(Merge(self._node, right._node, how, on, suffixes, cols))
+        engine.log_fallback("DataFrame.merge")
+        return self.to_pandas().merge(unwrap(right), how=how, on=on, **unwrap(kwargs))
 
     # -- everything else runs in real pandas --------------------------------
     def _fallback(self, name, args, kwargs):
