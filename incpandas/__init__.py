@@ -19,7 +19,7 @@ from .source import Source
 __version__ = "0.1.0"
 
 __all__ = ["read_csv", "check", "LazyFrame", "LazyGroupBy", "Source", "engine",
-           "fallback_log", "last_run", "unwrap", "__version__"]
+           "fallback_log", "last_run", "merge", "unwrap", "__version__"]
 
 _CSV_KW = {"sep", "delimiter", "usecols", "dtype", "na_values", "keep_default_na",
            "encoding", "quotechar", "decimal"}
@@ -42,6 +42,14 @@ def read_csv(filepath_or_buffer, **kwargs):
 def check(obj):
     """Assert an incpandas result equals a from-scratch pandas run. Returns True."""
     return obj.verify()
+
+
+def merge(left, right, how="inner", on=None, **kwargs):
+    """`pandas.merge`; incremental for lazy frames in the supported case, else real pandas."""
+    if isinstance(left, LazyFrame):
+        return left.merge(right, how=how, on=on, **kwargs)
+    engine.log_fallback("merge")
+    return _pd.merge(unwrap(left), unwrap(right), how=how, on=on, **unwrap(kwargs))
 
 
 def __getattr__(name):

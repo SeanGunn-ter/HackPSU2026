@@ -4,6 +4,8 @@ Mutation mode is seed % 5, applied at step 2 of a six-step trajectory:
   0 plain random appends   1 appended rows leave int column `a` empty (it becomes float)
   2 appended rows put text in `a`   3 edit a row in the middle, then append
   4 truncate to header + one row
+The right-hand table r.csv (used by merge ops) is mutated at step 3 in mode (seed // 5) % 4:
+0 unchanged, 1 appended, 2 edited in the middle, 3 replaced.
 At every step incpandas must agree with plain pandas: same result (value and type), or both
 raise the same exception type (a pandas error must also be an incpandas error).
 """
@@ -15,7 +17,7 @@ import pytest
 
 import incpandas as pd
 from fuzz_ops import OPS
-from test_fuzz_ops import HEADER, same
+from test_fuzz_ops import HEADER, attempt, mutate_right, right_rows, same, write_right
 
 SEEDS = int(os.environ.get("FUZZ_SEEDS", "5"))
 STEPS = 6
@@ -59,25 +61,20 @@ def mutate(mode, rng):
             f.write("\n".join(lines[:2]) + "\n")
 
 
-def attempt(fn):
-    try:
-        out = fn()
-        return out.to_pandas() if hasattr(out, "to_pandas") else out, None
-    except Exception as e:      # noqa: BLE001 - the exception type is what we compare
-        return None, e
-
-
 @pytest.mark.filterwarnings("ignore::Warning")
 @pytest.mark.parametrize("seed", range(SEEDS))
 @pytest.mark.parametrize("name", list(OPS))
 def test_op_survives_mutations(name, seed):
     op, rng = OPS[name], random.Random(f"{name}/{seed}")
     write(rows(rng, 6), header=True)
+    write_right(right_rows(rng, 5), header=True)
     for step in range(STEPS):
         if step == 2:
             mutate(seed % 5, rng)
         elif step:
             write(rows(rng, rng.randint(0, 3)))
+        if step == 3:
+            mutate_right((seed // 5) % 4, rng)
         want, werr = attempt(lambda: op(plain.read_csv("d.csv")))
         got, gerr = attempt(lambda: op(pd.read_csv("d.csv")))
         where = f"{name} seed={seed} step={step}"
