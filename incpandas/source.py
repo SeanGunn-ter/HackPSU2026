@@ -32,6 +32,8 @@ class Source(Node):
         df = pd.read_csv(io.BytesIO(raw), **self.kwargs)
         nl = raw.find(b"\n")
         header = raw[: nl + 1] if nl >= 0 and b'"' not in raw[:nl] else None
+        if len(df) == 0:   # dtypes of an empty read are all object; don't reuse them for appends
+            header = None
         ctx.set_state(self, {"size": len(raw), "sha": hashlib.sha256(raw).hexdigest(),
                              "nrows": len(df), "dtypes": df.dtypes.to_dict(), "header": header})
         ctx.changed = True

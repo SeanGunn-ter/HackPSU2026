@@ -230,3 +230,13 @@ def test_random_float_data_matches_within_tolerance():
         df = pd.read_csv("d.csv")
         getattr(df.x, fn)()
         assert engine.last_run()[Reduce(df.x.node, "x", fn).sig] == ("incremental", 50)
+
+
+def test_rows_appended_to_header_only_file():
+    write([])
+    check_all(("i", "f"))
+    write(ROWS1, header=False)
+    check_all()
+    write(ROWS2, header=False)
+    check_all()
+    assert reduce_run("i", "sum")[0] == ("incremental", 3)
