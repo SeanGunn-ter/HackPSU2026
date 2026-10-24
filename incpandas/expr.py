@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import datetime
 import operator
+import os
 
 import numpy as np
 import pandas as pd
@@ -27,6 +28,8 @@ _UN = {"neg": (operator.neg, "-"), "pos": (operator.pos, "+"),
 _ELEMENTWISE = {"isin", "between", "isna", "isnull", "notna", "notnull", "abs", "round", "fillna"}
 _STR_ELEMENTWISE = {"upper", "lower", "len", "strip", "lstrip", "rstrip", "contains",
                     "startswith", "endswith", "replace", "title", "capitalize"}
+
+_REDUCTIONS = {"sum", "mean", "min", "max", "count"}
 
 _SCALARS = (type(None), bool, int, float, complex, str, bytes, datetime.date,
             datetime.timedelta, np.generic, pd.Timedelta)
@@ -132,10 +135,26 @@ class Expr:
             return lambda *a, **k: Method(self, name, a, k)
         if name == "str":
             return _StrAccessor(self)
-        # Anything else (sum, mean, map, rank, ...): run for real in pandas.
+        if name in _REDUCTIONS and type(self) is Col:
+            return lambda *a, **k: self._reduce(name, a, k)
+        # Anything else (map, rank, ...): run for real in pandas.
         from . import engine
         engine.log_fallback(f"Series.{name}")
         return getattr(self.compute(), name)
+
+    def _reduce(self, name, args, kwargs):
+        """df.a.sum() etc.: running totals when called bare, else real pandas."""
+        from . import engine
+        if args or kwargs:
+            engine.log_fallback(f"Series.{name}")
+            return getattr(self.compute(), name)(*args, **kwargs)
+        from .reduce import Reduce
+        node = Reduce(self.node, self.name, name)
+        out = engine.materialize(node)
+        if os.environ.get("INCPANDAS_VERIFY"):
+            from .frame import assert_equal
+            assert_equal(out, engine.replay(node))
+        return out
 
 
 def _install_ops():
