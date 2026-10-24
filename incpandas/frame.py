@@ -7,7 +7,8 @@ import pandas as pd
 
 from . import engine
 from .expr import Col, Expr, Static, lift, _is_scalar
-from .nodes import Assign, Filter, GroupAgg, Mem, Project
+from .groupby import GroupAgg
+from .nodes import Assign, Filter, Mem, Project
 
 _PD_ATTRS = set(dir(pd.DataFrame))
 _GROUPBY_KW = {"as_index", "sort", "dropna"}

@@ -14,7 +14,7 @@ import pandas as _pd
 from . import engine
 from .engine import fallback_log, last_run
 from .frame import LazyFrame, LazyGroupBy, unwrap
-from .nodes import Source
+from .source import Source
 
 __version__ = "0.1.0"
 
