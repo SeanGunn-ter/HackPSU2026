@@ -3,3 +3,6 @@ __pycache__/
 .incpandas_cache/
 .pytest_cache/
 *.egg-info/
+
+.venv/
+
