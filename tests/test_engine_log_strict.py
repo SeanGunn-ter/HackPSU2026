@@ -138,3 +138,34 @@ def test_strict_raises_when_the_source_cannot_be_read_lazily(monkeypatch, tmp_pa
 def test_strict_is_off_by_default():
     write(ROWS, header=True)
     assert pd.read_csv("d.csv").a.map(lambda v: v + 1).sum() == 27
+
+
+# -- the "incremental run failed" warning ---------------------------------------------
+
+def test_genuine_error_raises_without_warning(monkeypatch):
+    from incpandas import engine
+    monkeypatch.setattr(engine, "_load", lambda sig: {"run": 1, "nodes": {}, "full": {}})
+
+    def boom(ctx):
+        raise ValueError("same error in plain pandas")
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        with pytest.raises(ValueError):
+            engine.run("sig-genuine", boom)
+
+
+def test_incremental_only_failure_warns_after_successful_retry(monkeypatch):
+    from incpandas import engine
+    monkeypatch.setattr(engine, "_load", lambda sig: {"run": 1, "nodes": {}, "full": {}})
+
+    def fn(ctx):
+        if ctx.prev_run:                       # only the incremental attempt fails
+            raise KeyError("bad state")
+        return 42
+    with pytest.warns(UserWarning, match="incremental run failed"):
+        assert engine.run("sig-incremental", fn) == 42
+
+
+def test_strict_fallback_is_exported():
+    assert pd.StrictFallback is StrictFallback

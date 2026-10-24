@@ -12,14 +12,14 @@ import types
 import pandas as _pd
 
 from . import engine
-from .engine import fallback_log, last_run
+from .engine import StrictFallback, fallback_log, last_run
 from .frame import LazyFrame, LazyGroupBy, unwrap
 from .source import Source
 
 __version__ = "0.1.0"
 
 __all__ = ["read_csv", "check", "LazyFrame", "LazyGroupBy", "Source", "engine",
-           "fallback_log", "last_run", "merge", "unwrap", "__version__"]
+           "StrictFallback", "fallback_log", "last_run", "merge", "unwrap", "__version__"]
 
 _CSV_KW = {"sep", "delimiter", "usecols", "dtype", "na_values", "keep_default_na",
            "encoding", "quotechar", "decimal"}
