@@ -12,19 +12,27 @@ df = df[df.revenue > 20]
 print(df.groupby("region").agg(total=("revenue", "sum"), orders=("qty", "count")))
 ```
 
-`python examples/demo.py` shows a rerun after an append. `python examples/benchmark.py` compares against plain pandas
-(2M rows, +1,000 appended, best of 3, results asserted equal; one machine, pandas 3.0.5):
+`python examples/demo.py` shows a rerun after an append. `python examples/benchmark.py` compares against plain
+pandas across five pipelines, three scenarios each, with every result asserted equal to pandas. Medians of 5
+repeats, 2M rows, +1,000 appended, python 3.10 / pandas 2.3.3 on one (busy) laptop — treat these as the shape of
+the result, not as precise figures, and rerun it on your own machine:
 
-| scenario | pandas | incpandas | speedup |
+| pipeline | first run | append 1,000 | no change |
 |---|---|---|---|
-| groupby: first run | 0.78s | 0.66s | 1.2x |
-| groupby: append 1,000 rows | 0.47s | 0.024s | ~20x |
-| groupby: no change | 0.49s | 0.025s | ~20x |
-| row-wise (filter) result: first run | 0.37s | 0.35s | 1.1x |
-| row-wise result: append 1,000 rows | 0.25s | 0.049s | ~5x |
-| row-wise result: no change | 0.28s | 0.041s | ~7x |
+| `groupby` agg | 1.0x | **11.2x** | 20.3x |
+| `merge` + groupby | 1.0x | **11.9x** | 16.9x |
+| `(df.a * df.b).sum()` | 1.0x | **8.5x** | 16.1x |
+| `df.a.sum()` | 1.0x | **7.5x** | 14.1x |
+| row-wise filter (large output) | 0.9x | **3.2x** | 7.2x |
 
-The row-wise case is slower than groupby because it loads and re-saves the full previous output each time.
+Two things worth being straight about. The first run is never faster — incpandas does pandas' work and then saves
+state, so the win only starts on the rerun. And the append column is the one that matters: an earlier version of
+this table reported ~20x for appends, but it was repeating a run without appending again, which measures the
+no-change path. Appending is strictly more work than not appending.
+
+`--json results.json` writes the full results, including a breakdown of where a rerun's time actually goes. On the
+row-wise pipeline that breakdown says ~58% is loading and rewriting the 31 MB of saved output, and on the cheaper
+pipelines the whole-file read and hash is the largest single part — which is where the remaining speedup is.
 
 ## How it works
 1. `read_csv`, column math, filters, column selection and `groupby` are recorded into a plan (DAG) (`incpandas/nodes.py`) rather than executed.
