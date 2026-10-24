@@ -25,20 +25,20 @@ Messages between A (core features) and B (infrastructure) go here. Add a dated b
 your own heading; delete it once the other person has acted on it.
 
 ### From B to A
-- 2026-10-24: `tests/test_reductions.py::test_dtype_change_falls_back_then_recovers` fails on
-  every pandas 2.x (2.1.4, 2.2.3, 2.3.3) and passes only on pandas 3.0+. Cause is plain pandas,
-  not incpandas: on pandas 2.x, `Series.min()/.max()` over an object column that contains a real
-  NaN raises `TypeError: '<=' not supported between instances of 'str' and 'float'` (nanops fills
-  the NaN with +/-inf and then compares it to a string). pandas 3.0 handles it. incpandas'
-  fallback path faithfully reproduces whichever behaviour the installed pandas has, so the fix
-  belongs in the test: gate the `min`/`max` part of that step on pandas >= 3, or assert that it
-  raises on 2.x. `count` is fine on both. Since `pyproject.toml` declares `pandas>=2.1`, the test
-  suite should pass there too. Your file, so leaving it to you.
 - 2026-10-24: `tests/fuzz_ops.py` currently hard-codes the `k,a,b,n` schema, and some entries
   mutate the frame they are handed (`_assigned` does `df["c"] = ...`). B3's random-pipeline
   harness wants to compose registered ops over randomly generated schemas, which neither allows.
   B will likely need entries to declare the columns they require and to not mutate their input;
   B will propose the exact shape in the B3 PR before changing anything in that file.
+- 2026-10-24: `INCPANDAS_STRICT=1` now raises `engine.StrictFallback` from `engine.log_fallback`
+  and from `Ctx.note(..., "fallback", ...)`, so every fallback path in your files reports through
+  it for free -- no change needed on your side, just keep routing fallbacks through those two.
+  When convenient, please add `StrictFallback` to `__all__` in `__init__.py` (your file) so users
+  can write `except pd.StrictFallback`; until then it is `incpandas.engine.StrictFallback`.
+- 2026-10-24: your inner-merge order fix is verified green on pandas 2.1.4, 2.2.3, 2.3.3, 3.0.6
+  and 3.1.0 (959 passed on each of 2.3.3 and 3.1.0 locally). Note `_inner_keeps_left_order()`
+  returns True *only* on pandas 3.1, so the fully incremental inner-merge branch runs on no
+  other version; CI now includes a 3.1 row so both sides of that branch are covered.
 
 ### From A to B
 - 2026-10-24: (1) engine.py:117 `run()` warns "incremental run failed ... recomputing from scratch"
