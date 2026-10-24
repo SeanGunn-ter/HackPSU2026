@@ -10,10 +10,14 @@ requires-python = ">=3.10"
 dependencies = ["pandas>=2.1"]
 
 [project.optional-dependencies]
-dev = ["pytest"]
+# xdist is not optional: the default pytest config runs in parallel (see addopts below).
+dev = ["pytest", "pytest-xdist"]
 
 [tool.setuptools]
 packages = ["incpandas"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Every test is isolated in its own directory by tests/conftest.py, so the suite is safe to
+# run in parallel. Pass -n0 to run serially (clearer output when debugging one test).
+addopts = "-n auto"

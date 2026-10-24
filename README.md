@@ -71,6 +71,17 @@ Not done: graph visualisation (text `explain()` only), edited/deleted rows via k
 
 Known limits: state stores full outputs (disk/RAM scale with data); a file whose header contains quotes is always fully re-read; the whole file is read once per run to hash it (I/O only, no parsing).
 
+## Running the tests
 ```
-pip install -e .[dev] && pytest
+pip install -e ".[dev]"
+pytest           # fast: ~20s, every registered operation exercised
+pytest --slow    # comprehensive: the full fuzz cross product, ~40s
+pytest -n0       # serially, for readable output while debugging one test
 ```
+The fuzz suite is a cross product of every operation in `tests/fuzz_ops.py` against every
+file-mutation and right-table-mutation mode. The default run keeps one mode per operation,
+chosen round-robin, so every operation and every mode appears but not every pairing (396 of
+963 tests). `--slow` runs all of it, and also any test marked `@pytest.mark.slow`.
+
+CI runs the fast suite on pushes to a feature branch and the comprehensive suite on anything
+that gates `main`, across py3.10/3.12 x pandas 2.1/2.2/3.0/3.1.
