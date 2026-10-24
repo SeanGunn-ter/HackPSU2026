@@ -24,12 +24,20 @@ _notes = {}
 
 
 def check(col, fn):
-    """Compute through incpandas and compare value and type with plain pandas."""
+    """Compute through incpandas and compare value and type with plain pandas.
+
+    If plain pandas raises (e.g. min() of a mixed object column on pandas 2.x), incpandas
+    must raise the same exception type."""
     df = pd.read_csv("d.csv")
+    try:
+        want = getattr(plain.read_csv("d.csv")[col], fn)()
+    except Exception as e:      # noqa: BLE001 - the exception type is what we compare
+        with pytest.raises(type(e)):
+            getattr(df[col], fn)()
+        return None
     got = getattr(df[col], fn)()
     run = engine.last_run()
     _notes[col, fn] = (run.get(Reduce(df[col].node, col, fn).sig), run)
-    want = getattr(plain.read_csv("d.csv")[col], fn)()
     assert type(got) is type(want), (col, fn, got, want)
     assert (got == want) or (plain.isna(got) and plain.isna(want)), (col, fn, got, want)
     return got
