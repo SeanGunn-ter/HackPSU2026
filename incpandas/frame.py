@@ -311,6 +311,8 @@ class LazyFrame:
         cols = self._node.columns
         if name not in _PD_ATTRS and cols is not None and name in cols:
             return Col(self._node, name)
+        if name == "columns" and cols and all(isinstance(c, str) for c in cols):
+            return pd.Index(cols)      # known without running the plan; same inference as pandas
         if name in ("loc", "iloc", "at", "iat"):
             return _Indexer(self, name)
         engine.log_fallback(f"DataFrame.{name}")

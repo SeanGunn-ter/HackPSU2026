@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as plain
+import pytest
 
 import incpandas as pd
 from incpandas import engine
@@ -315,3 +316,49 @@ def test_randomized_against_pandas():
         for r in go():
             r.verify()
         write("d.csv", rows(int(rng.integers(0, 12))), header=False)
+
+
+def test_to_pandas_of_in_memory_frame_is_not_aliased():
+    write("d.csv", ROWS1)
+    df = pd.read_csv("d.csv")
+    df.loc[0, "a"] = 99                      # pandas fallback -> in-memory frame
+    p = df.to_pandas()
+    p["x"] = 1
+    p.loc[1, "a"] = -1
+    assert "x" not in list(df.to_pandas().columns)
+    assert df.to_pandas().loc[1, "a"] == 3
+
+
+COLUMN_PIPELINES = {
+    "source": lambda d: d,
+    "project": lambda d: d[["a", "k"]],
+    "rename": lambda d: d.rename(columns={"a": "aa"}),
+    "drop": lambda d: d.drop(columns=["j"]),
+    "assign": lambda d: d.assign(c=d.a * 2),
+    "astype": lambda d: d.astype({"a": "float64"}),
+    "filter": lambda d: d[d.a > 2],
+    "fillna": lambda d: d.fillna(0),
+    "groupby": lambda d: d.groupby("k")[["a", "b"]].sum(),
+    "groupby_no_index": lambda d: d.groupby("k", as_index=False).agg(a=("a", "sum"), m=("b", "max")),
+}
+
+
+@pytest.mark.parametrize("name", list(COLUMN_PIPELINES))
+def test_columns_match_pandas_without_running_the_plan(name, monkeypatch):
+    write("d.csv", ROWS1)
+    df = COLUMN_PIPELINES[name](pd.read_csv("d.csv"))
+    want = COLUMN_PIPELINES[name](plain.read_csv("d.csv"))
+
+    def boom(*a, **k):
+        raise AssertionError("df.columns ran the plan")
+    monkeypatch.setattr(engine, "materialize", boom)
+    got = df.columns
+    assert isinstance(got, plain.Index)
+    plain.testing.assert_index_equal(got, want.columns, exact=True)
+
+
+def test_columns_of_unknown_shape_still_works():
+    write("d.csv", ROWS1)
+    df = pd.read_csv("d.csv")
+    df.loc[0, "a"] = 99                      # in-memory frame: columns known from the data
+    assert list(df.columns) == list(plain.read_csv("d.csv").columns)
