@@ -7,9 +7,10 @@ import numpy as np
 import pandas as pd
 
 from . import engine
-from .expr import Col, Expr, lift
+from .expr import Col, Expr, _is_scalar, lift
 from .groupby import GroupAgg
 from .nodes import Assign, Filter, Mem, Project
+from .rowwise import AsType, DropNa, Drop, FillNa, Rename
 
 _PD_ATTRS = set(dir(pd.DataFrame))
 _GROUPBY_KW = {"as_index", "sort", "dropna"}
@@ -155,7 +156,141 @@ class LazyFrame:
         engine.log_fallback("DataFrame.groupby")
         return self.to_pandas().groupby(unwrap(by), *unwrap(args), **unwrap(kwargs))
 
+    # -- row-wise operations: incremental when the call qualifies, else pandas ---
+    def _known_cols(self):
+        cols = self._node.columns
+        return cols if cols is not None and len(set(cols)) == len(cols) else None
+
+    def _rowwise(self, node, inplace):
+        if inplace:
+            object.__setattr__(self, "_node", node)
+            return None
+        return LazyFrame(node)
+
+    @staticmethod
+    def _colnames(x, cols):
+        """x as a list of distinct existing column names, or None."""
+        names = [x] if isinstance(x, str) else x
+        if (isinstance(names, list) and all(isinstance(n, str) and n in cols for n in names)
+                and len(set(names)) == len(names)):
+            return names
+        return None
+
+    def rename(self, *args, **kwargs):
+        cols = self._known_cols()
+        kw = dict(kwargs)
+        inplace = kw.pop("inplace", False)
+        m = kw.pop("columns", None)
+        if (cols is not None and not args and not kw and inplace in (True, False)
+                and isinstance(m, dict) and m):
+            new = [m.get(c, c) for c in cols]
+            if len(set(new)) == len(new):
+                eff = {c: m[c] for c in cols if c in m}
+                return self._rowwise(Rename(self._node, {"columns": eff}), inplace)
+        return self._fallback("rename", args, kwargs)
+
+    def drop(self, *args, **kwargs):
+        cols = self._known_cols()
+        kw = dict(kwargs)
+        inplace = kw.pop("inplace", False)
+        axis, target = kw.pop("axis", None), kw.pop("columns", None)
+        labels, rest = kw.pop("labels", None), args
+        if rest and labels is None:
+            labels, rest = rest[0], rest[1:]
+        if rest and axis is None:
+            axis, rest = rest[0], rest[1:]
+        if cols is not None and not rest and not kw and inplace in (True, False):
+            if labels is not None and target is None and axis in (1, "columns"):
+                target, labels = labels, None
+            if labels is None and target is not None and axis in (None, 1, "columns"):
+                names = self._colnames(target, cols)
+                if names is not None:
+                    return self._rowwise(Drop(self._node, {"columns": names}), inplace)
+        return self._fallback("drop", args, kwargs)
+
+    def astype(self, *args, **kwargs):
+        cols = self._known_cols()
+        kw = dict(kwargs)
+        dtype = kw.pop("dtype", args[0] if len(args) == 1 else None)
+        if cols is not None and dtype is not None and not kw and len(args) + ("dtype" in kwargs) == 1:
+            norm = self._numeric_dtypes(dtype, cols)
+            if norm is not None:
+                return LazyFrame(AsType(self._node, {"dtype": norm}))
+        return self._fallback("astype", args, kwargs)
+
+    @staticmethod
+    def _numeric_dtypes(dtype, cols):
+        def one(t):
+            try:
+                dt = np.dtype(t)
+            except (TypeError, ValueError):
+                return None
+            return str(dt) if dt.kind in "iuf" else None
+        if isinstance(dtype, dict):
+            if not dtype or not all(isinstance(k, str) and k in cols for k in dtype):
+                return None
+            out = {k: one(v) for k, v in dtype.items()}
+            return out if all(v is not None for v in out.values()) else None
+        return one(dtype)
+
+    def dropna(self, *args, **kwargs):
+        cols = self._known_cols()
+        kw = dict(kwargs)
+        inplace = kw.pop("inplace", False)
+        axis = kw.pop("axis", 0)
+        how, thresh = kw.pop("how", None), kw.pop("thresh", None)
+        subset = kw.pop("subset", None)
+        if (cols is not None and not args and not kw and inplace in (True, False)
+                and axis in (0, "index") and how in (None, "any", "all")
+                and (thresh is None or (isinstance(thresh, int) and not isinstance(thresh, bool)))
+                and not (how is not None and thresh is not None)):
+            params = {}
+            if how is not None:
+                params["how"] = how
+            if thresh is not None:
+                params["thresh"] = thresh
+            names = None if subset is None else self._colnames(subset, cols)
+            if subset is None or names is not None:
+                if names is not None:
+                    params["subset"] = names
+                return self._rowwise(DropNa(self._node, params), inplace)
+        return self._fallback("dropna", args, kwargs)
+
+    def fillna(self, *args, **kwargs):
+        cols = self._known_cols()
+        kw = dict(kwargs)
+        inplace = kw.pop("inplace", False)
+        given = list(args) + ([kw.pop("value")] if "value" in kw else [])
+        if (cols is not None and len(given) == 1 and len(args) <= 1 and not kw
+                and inplace in (True, False) and self._scalar_fill(given[0], cols)):
+            return self._rowwise(FillNa(self._node, {"value": dict(given[0]) if isinstance(given[0], dict) else given[0]}), inplace)
+        return self._fallback("fillna", args, kwargs)
+
+    @staticmethod
+    def _scalar_fill(value, cols):
+        if isinstance(value, dict):
+            return bool(value) and all(isinstance(k, str) and k in cols and v is not None
+                                       and _is_scalar(v) for k, v in value.items())
+        return value is not None and _is_scalar(value)
+
+    def assign(self, **kwargs):
+        frame = LazyFrame(self._node)
+        for key, val in kwargs.items():
+            if callable(val) and not isinstance(val, (Expr, LazyFrame)):
+                val = val(frame)
+            frame[key] = val      # Assign when columns are known, else pandas fallback
+        return frame
+
     # -- everything else runs in real pandas --------------------------------
+    def _fallback(self, name, args, kwargs):
+        engine.log_fallback(f"DataFrame.{name}")
+        if kwargs.get("inplace"):
+            work = self.to_pandas().copy()
+            out = getattr(work, name)(*unwrap(args), **unwrap(kwargs))
+            _swap(self, work)
+            return out
+        return getattr(self.to_pandas(), name)(*unwrap(args), **unwrap(kwargs))
+
     def __getattr__(self, name):
         if name.startswith("_"):
             raise AttributeError(name)
