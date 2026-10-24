@@ -135,7 +135,7 @@ class Expr:
             return lambda *a, **k: Method(self, name, a, k)
         if name == "str":
             return _StrAccessor(self)
-        if name in _REDUCTIONS and type(self) is Col:
+        if name in _REDUCTIONS:
             return lambda *a, **k: self._reduce(name, a, k)
         # Anything else (map, rank, ...): run for real in pandas.
         from . import engine
@@ -143,13 +143,20 @@ class Expr:
         return getattr(self.compute(), name)
 
     def _reduce(self, name, args, kwargs):
-        """df.a.sum() etc.: running totals when called bare, else real pandas."""
+        """df.a.sum() / (df.a * 2).sum() etc.: running totals when called bare, else real pandas."""
         from . import engine
         if args or kwargs:
             engine.log_fallback(f"Series.{name}")
             return getattr(self.compute(), name)(*args, **kwargs)
-        from .reduce import Reduce
-        node = Reduce(self.node, self.name, name)
+        from .reduce import Reduce, reduction_input
+        if type(self) is Col:
+            node = Reduce(self.node, self.name, name)
+        else:
+            src = reduction_input(self)
+            if src is None:
+                engine.log_fallback(f"Series.{name}")
+                return getattr(self.compute(), name)()
+            node = Reduce(src[0], src[1], name)
         out = engine.materialize(node)
         if os.environ.get("INCPANDAS_VERIFY"):
             from .frame import assert_equal

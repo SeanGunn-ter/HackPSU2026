@@ -3,10 +3,11 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from .nodes import Node, StateMismatch, _h
+from .nodes import Assign, Node, StateMismatch, _h
 
 FUNCS = ("sum", "mean", "min", "max", "count")
 _NEED = {"sum": ("sum",), "count": ("count",), "mean": ("sum", "count"), "min": ("min",), "max": ("max",)}
+_BOOL_OK = ("sum", "count", "mean")   # min/max of a bool give numpy bool; left to pandas
 _EXACT_FLOAT = 2 ** 53   # beyond this an int sum no longer converts to float64 exactly
 
 
@@ -22,6 +23,29 @@ def _empty(fn, dt, n):
     """What pandas returns when no non-null values were seen (keeps its exact result type)."""
     vals = np.full(min(n, 1), np.nan) if dt.kind == "f" else []
     return getattr(pd.Series(vals, dtype=dt), fn)()
+
+
+class _ReductionInput(Assign):
+    """Hidden step holding a formula in a temporary column so Reduce can total it."""
+
+    def label(self):
+        return f"[for reduction] {self.expr.text}"
+
+
+def reduction_input(expr):
+    """(node, column) to reduce for a formula over one plan node, or None if not possible."""
+    if expr.opaque or expr.sig == "":
+        return None
+    by_sig = {n.sig: n for n in expr.nodes}
+    if len(by_sig) != 1:
+        return None
+    (parent,) = by_sig.values()
+    if parent.columns is None:
+        return None
+    col = "__incpandas_" + _h("redcol", expr.sig)[:10]
+    while col in parent.columns:
+        col += "_"
+    return _ReductionInput(parent, col, expr), col
 
 
 class Reduce(Node):
@@ -43,6 +67,8 @@ class Reduce(Node):
     def stream(self, ctx):
         d, reset = ctx.stream(self.parent)
         s = d[self.col]
+        if s.dtype == np.bool_ and self.fn in _BOOL_OK:
+            s = s.astype(np.int64)   # pandas totals booleans as integers
         if _eligible(s.dtype):
             st = None
             if not reset:
