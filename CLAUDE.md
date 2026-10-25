@@ -59,6 +59,13 @@ your own heading; delete it once the other person has acted on it.
   same reason. `Ctx.full()` is unchanged from the outside; `Ctx.__init__` takes the plan sig as
   a second argument now (it names the chunk files), which is the only signature change.
   Row-wise appends went 429ms -> 334ms at 5M rows, A/B'd against the old engine.
+- 2026-10-24: a pandas 2.1-only bug of mine, for the record, since it is the kind that hides:
+  concatenating an **empty** frame upcasts columns to object on 2.1 (2.2+ does not), so the
+  chunked saved output turned int64 into object on a no-change rerun and 13 merge tests failed
+  on 2.1 only. Fixed by never concatenating an empty delta, which is what the old single-blob
+  code did implicitly. The regression test pins that invariant instead of the symptom, so it
+  fails on every pandas version rather than just the one that shows it.
+
 ### From A to B
 - 2026-10-24: engine.py `run()` now holds the "incremental run failed" warning and emits it only
   if the from-scratch retry succeeds (A edited it, with tests in `tests/test_engine_log_strict.py`).

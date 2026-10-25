@@ -144,3 +144,43 @@ def test_no_change_writes_no_chunk():
     before = chunks()
     run()
     assert chunks() == before
+
+
+def test_an_empty_delta_is_never_concatenated(monkeypatch):
+    """Rebuilding the output must not mix an empty frame in.
+
+    pandas 2.1 upcasts columns to object when an empty frame takes part in a concat, so a
+    no-change rerun silently turned int64 into object there while 2.2+ looked fine. Pin the
+    invariant rather than the symptom, so it holds on every version.
+    """
+    seen = []
+    real = engine.pd.concat
+
+    def spy(frames, *a, **k):
+        frames = list(frames)
+        seen.append([len(f) for f in frames])
+        return real(frames, *a, **k)
+
+    monkeypatch.setattr(engine.pd, "concat", spy)
+
+    write(rows(30), header=True)
+    run()
+    for i in range(3):                       # several chunks, so a rebuild has to concat
+        write(rows(2, start=100 + 10 * i))
+        run()
+    run()                                    # the no-change rerun: empty delta
+    run()
+
+    assert seen, "expected the chunked output to be rebuilt at least once"
+    assert all(all(n > 0 for n in sizes) for sizes in seen), seen
+
+
+def test_dtypes_survive_appends_and_a_no_change_rerun():
+    write(rows(30), header=True)
+    run()
+    for i in range(3):
+        write(rows(2, start=100 + 10 * i))
+        run()
+    got = run()                              # no change since the last run
+    assert got["a"].dtype == plain.read_csv("d.csv").a.dtype
+    assert str(got["a"].dtype) != "object"

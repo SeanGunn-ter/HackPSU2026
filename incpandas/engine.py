@@ -110,9 +110,16 @@ class Ctx:
             if ent is None or ent["run"] != self.prev_run:
                 raise StateMismatch(node.label())
             parts = [_read_chunk(name) for name in ent["chunks"]]
+            if not parts:
+                raise StateMismatch(node.label())
             chunks, seq = list(ent["chunks"]), ent["seq"]
-
-            out = parts[0] if len(parts) == 1 and len(d) == 0 else pd.concat(parts + [d])
+            if len(d):
+                parts.append(d)
+            # Never concatenate an empty frame in. On pandas 2.1 that upcasts columns to
+            # object, which the single-blob version never risked because it returned the
+            # previous output untouched whenever the delta was empty.
+            keep = [p for p in parts if len(p)] or parts[:1]
+            out = keep[0] if len(keep) == 1 else pd.concat(keep)
 
         if reset or len(d):
             if reset or len(chunks) >= MAX_CHUNKS:
