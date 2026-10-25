@@ -1,9 +1,9 @@
 """A web-access-log style dataset: groupby + filter, append new log lines, rerun.
 
-The timestamp column is kept as text (incpandas reads it as a plain string column), status
-codes, byte counts and endpoints are ordinary columns. The pipeline keeps server errors and
-slow-ish responses, then reports requests and bytes per endpoint. Appending new log lines
-only processes the new lines.
+The timestamp column is kept as text (a plain string column); status codes, byte counts and
+latencies are numbers and endpoints are strings. The pipeline keeps server errors (status
+>= 500), adds a size-in-KB column, then reports error count, total KB and worst latency per
+endpoint. Appending new log lines only processes the new lines.
 
     python examples/07_realistic_logs.py
     python examples/07_realistic_logs.py --rows 1000000 --append 2000
@@ -61,14 +61,14 @@ def timed(lib):
 print(f"writing {args.rows:,} log lines ...")
 log_lines(args.rows, 0).to_csv("access.csv", index=False)
 print(open("access.csv").readlines()[1].strip(), "  <- an example line")
-print(f"\n{'':28s}{'pandas':>10s}{'incpandas':>12s}{'speedup':>10s}")
 for label, extra in [("first run", 0), (f"append {args.append:,} lines", args.append), ("no change", 0)]:
     if extra:
         log_lines(extra, 1, start="2026-10-02 00:00:00").to_csv("access.csv", mode="a", header=False, index=False)
+    print(f"\n{label}")
     tp, want = timed(pandas)
     ti, got = timed(incpandas)
     pandas.testing.assert_frame_equal(got, want, check_exact=False, rtol=1e-7)
-    print(f"{label:28s}{tp:9.3f}s{ti:11.3f}s{tp / ti:9.1f}x")
+    print(f"  pandas {tp:7.3f}s   incpandas {ti:7.3f}s   speedup {tp / ti:5.1f}x")
 
 print("\n", got.round(1).to_string(), sep="")
 errors_by_endpoint(incpandas).verify()

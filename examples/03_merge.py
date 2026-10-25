@@ -41,9 +41,7 @@ def report():
 
 
 def what_happened(out):
-    merge = [mode for sig, (mode, rows) in pd.last_run().items()]
-    print(out.explain())
-    print("  node modes this run:", ", ".join(merge))
+    print(out.explain())      # "(last run: ...)" is what each node did in the run just finished
 
 
 facts(300_000, 0).to_csv("facts.csv", index=False)

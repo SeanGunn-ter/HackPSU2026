@@ -52,7 +52,6 @@ def run(lib):
 
 print(f"building sales.csv with {args.rows:,} rows ...")
 make_rows(args.rows, seed=0).to_csv("sales.csv", index=False)
-print(f"{'':28s}{'pandas':>10s}{'incpandas':>12s}{'speedup':>10s}")
 
 last = None
 for label, extra in [(f"first run ({args.rows:,} rows)", 0),
@@ -60,10 +59,11 @@ for label, extra in [(f"first run ({args.rows:,} rows)", 0),
                      ("no change", 0)]:
     if extra:
         make_rows(extra, seed=1).to_csv("sales.csv", mode="a", header=False, index=False)
+    print(f"\n{label}")
     t_plain, want = run(pandas)
     t_inc, got = run(incpandas)
     pandas.testing.assert_frame_equal(got, want, check_exact=False, rtol=1e-7)
-    print(f"{label:28s}{t_plain:9.3f}s{t_inc:11.3f}s{t_plain / t_inc:9.1f}x")
+    print(f"  pandas {t_plain:7.3f}s   incpandas {t_inc:7.3f}s   speedup {t_plain / t_inc:5.1f}x")
     last = pipeline(incpandas)
 
 last.verify()

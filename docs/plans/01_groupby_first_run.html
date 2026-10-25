@@ -1,0 +1,43 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Column math + filter + groupby: first run</title><style>
+:root { color-scheme: light dark;
+  --bg:#fff; --fg:#1b1f24; --muted:#6b7280; --line:#9aa4b2; --card:#f6f8fa;
+  --inc:#1a7f37; --inc-bg:#e9f7ee; --full:#0a5cc4; --full-bg:#e8f1fd;
+  --fb:#c0392b; --fb-bg:#fdecea; --none:#6b7280; --none-bg:#f1f3f5; }
+@media (prefers-color-scheme: dark) { :root {
+  --bg:#0d1117; --fg:#e6edf3; --muted:#9198a1; --line:#5b6472; --card:#161b22;
+  --inc:#4ac26b; --inc-bg:#12261a; --full:#6cb0ff; --full-bg:#0f1f33;
+  --fb:#ff8a80; --fb-bg:#2b1412; --none:#9198a1; --none-bg:#1b2027; } }
+* { box-sizing:border-box }
+body { margin:0; padding:24px; background:var(--bg); color:var(--fg);
+  font:14px/1.5 ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif }
+h1 { font-size:19px; margin:0 0 4px }
+.sub { color:var(--muted); margin:0 0 18px }
+.sub code { background:var(--card); padding:1px 5px; border-radius:4px }
+.legend { display:flex; gap:18px; flex-wrap:wrap; margin:0 0 18px; padding:0; list-style:none }
+.legend li { display:flex; align-items:center; gap:7px; color:var(--muted) }
+.legend i { width:11px; height:11px; border-radius:3px; border:1.5px solid }
+.wrap { overflow-x:auto; border:1px solid var(--card); border-radius:10px; background:var(--card) }
+svg { display:block; max-width:100%; height:auto }
+.edge { fill:none; stroke:var(--line); stroke-width:1.6 }
+marker path { fill:var(--line) }
+.node rect { stroke-width:1.6 }
+.node text { font:12px/1 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace }
+.node .kind { font-weight:600; font-size:12.5px }
+.node .idx { fill:var(--muted); font-weight:400 }
+.node .label { fill:var(--fg) }
+.node .status, .node .why { font-size:11px }
+.node.inc rect { fill:var(--inc-bg); stroke:var(--inc) }
+.node.inc .kind, .node.inc .status { fill:var(--inc) }
+.node.full rect { fill:var(--full-bg); stroke:var(--full) }
+.node.full .kind, .node.full .status { fill:var(--full) }
+.node.fb rect { fill:var(--fb-bg); stroke:var(--fb) }
+.node.fb .kind, .node.fb .status, .node.fb .why { fill:var(--fb) }
+.node.none rect { fill:var(--none-bg); stroke:var(--none); stroke-dasharray:4 3 }
+.node.none .kind, .node.none .status { fill:var(--none) }
+.node .why { fill:var(--muted) }
+footer { color:var(--muted); margin-top:16px; font-size:12.5px }
+</style></head><body><h1>Column math + filter + groupby: first run</h1><p class="sub">Colours are the last run.</p><ul class="legend"><li><i style="background:var(--inc-bg);border-color:var(--inc)"></i>incremental</li><li><i style="background:var(--full-bg);border-color:var(--full)"></i>full pass</li><li><i style="background:var(--fb-bg);border-color:var(--fb)"></i>pandas fallback</li><li><i style="background:var(--none-bg);border-color:var(--none)"></i>not run yet</li></ul><div class="wrap"><svg viewBox="0 0 288 554" width="288" xmlns="http://www.w3.org/2000/svg" role="img"><defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z"/></marker></defs><path class="edge" d="M 144.0 108 C 144.0 137.0, 144.0 137.0, 144.0 166" marker-end="url(#arrow)"/><path class="edge" d="M 144.0 248 C 144.0 277.0, 144.0 277.0, 144.0 306" marker-end="url(#arrow)"/><path class="edge" d="M 144.0 388 C 144.0 417.0, 144.0 417.0, 144.0 446" marker-end="url(#arrow)"/><g class="node full"><title>read_csv(sales.csv)
+columns: region, qty, price</title><rect x="26.0" y="26" width="236" height="82" rx="9"/><text class="kind" x="38.0" y="47"><tspan class="idx">#0</tspan> Source</text><text class="label" x="38.0" y="65">read_csv(sales.csv)</text><text class="status" x="38.0" y="82">full pass · 20,000 rows</text></g><g class="node full"><title>revenue = (qty * price)
+columns: region, qty, price, revenue</title><rect x="26.0" y="166" width="236" height="82" rx="9"/><text class="kind" x="38.0" y="187"><tspan class="idx">#1</tspan> Assign</text><text class="label" x="38.0" y="205">revenue = (qty * price)</text><text class="status" x="38.0" y="222">full pass · 20,000 rows</text></g><g class="node full"><title>(revenue &gt; 20)
+columns: region, qty, price, revenue</title><rect x="26.0" y="306" width="236" height="82" rx="9"/><text class="kind" x="38.0" y="327"><tspan class="idx">#2</tspan> Filter</text><text class="label" x="38.0" y="345">(revenue &gt; 20)</text><text class="status" x="38.0" y="362">full pass · 20,000 rows</text></g><g class="node full"><title>groupby(&#x27;region&#x27;).agg(total=(&#x27;revenue&#x27;, &#x27;sum&#x27;), orders=(&#x27;qty&#x27;, &#x27;count&#x27;))
+columns: total, orders</title><rect x="26.0" y="446" width="236" height="82" rx="9"/><text class="kind" x="38.0" y="467"><tspan class="idx">#3</tspan> GroupBy</text><text class="label" x="38.0" y="485">groupby(&#x27;region&#x27;).agg(total=(…</text><text class="status" x="38.0" y="502">full pass · 18,122 rows</text></g></svg></div><footer>Arrows point from a node to the nodes that depend on it. Hover a node for its full label and columns.</footer></body></html>

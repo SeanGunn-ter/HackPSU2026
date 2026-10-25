@@ -3,7 +3,7 @@
 Each graph is the plan of a pipeline drawn by incpandas.viz right after a real run, so the
 colours are what that run really did: green = incremental, blue = full pass, red = pandas
 fallback. Pass --png to also save a PNG of each next to its HTML (needs the `playwright`
-package and a Chromium; used for slides).
+package and a Chromium, set CHROMIUM_PATH to use a specific browser binary; used for slides).
 
     python examples/06_plan_graphs.py
     python examples/06_plan_graphs.py --out /tmp/plans --png
@@ -21,7 +21,7 @@ ap.add_argument("--out", default=os.path.join(os.path.dirname(os.path.abspath(__
                 help="output folder (default: docs/plans)")
 ap.add_argument("--png", action="store_true", help="also save a PNG of each graph (needs playwright)")
 args = ap.parse_args()
-out_dir = os.path.abspath(args.out)
+out_dir = os.path.normpath(os.path.abspath(args.out))
 os.makedirs(out_dir, exist_ok=True)
 
 work = tempfile.mkdtemp(prefix="incpandas-plans-")
@@ -47,7 +47,7 @@ def fresh_cache(name):
 def save(frame, name, title):
     frame.to_pandas()                       # run it, so the graph shows this run
     path = viz.graph(frame, os.path.join(out_dir, name), title)
-    print("wrote", os.path.relpath(path))
+    print("wrote", os.path.normpath(path))
     return path
 
 
@@ -115,12 +115,12 @@ paths.append(save(chain(), "05_row_wise_chain.html", "rename / dropna / fillna /
 if args.png:
     from playwright.sync_api import sync_playwright
     with sync_playwright() as p:
-        browser = p.chromium.launch()
+        browser = p.chromium.launch(executable_path=os.environ.get("CHROMIUM_PATH") or None)
         page = browser.new_page(viewport={"width": 1100, "height": 700}, device_scale_factor=2)
         for path in paths:
             page.goto("file://" + path)
-            page.locator(".wrap").screenshot(path=path[:-5] + ".png")
-            print("wrote", os.path.relpath(path[:-5] + ".png"))
+            page.locator("svg").screenshot(path=path[:-5] + ".png")
+            print("wrote", os.path.normpath(path[:-5] + ".png"))
         browser.close()
 
 shutil.rmtree(work, ignore_errors=True)
