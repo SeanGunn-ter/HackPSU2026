@@ -8,7 +8,9 @@ the same as pandas (incpandas also saves state); the gain is on the reruns.
     python examples/02_side_by_side.py --rows 2000000 --append 5000
 """
 import argparse
+import atexit
 import os
+import shutil
 import tempfile
 import time
 
@@ -21,6 +23,7 @@ ap.add_argument("--append", type=int, default=1_000, help="rows added before the
 args = ap.parse_args()
 
 work = tempfile.mkdtemp(prefix="incpandas-sidebyside-")
+atexit.register(shutil.rmtree, work, ignore_errors=True)   # clean up the temp folder on exit
 os.chdir(work)
 os.environ["INCPANDAS_CACHE"] = os.path.join(work, "cache")
 os.environ["INCPANDAS_LOG"] = "1"

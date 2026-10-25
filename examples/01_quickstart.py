@@ -5,13 +5,16 @@ the rows that were appended; INCPANDAS_LOG=1 prints how many rows each run proce
 
     python examples/01_quickstart.py
 """
+import atexit
 import os
+import shutil
 import tempfile
 
 import numpy as np
 import pandas
 
 work = tempfile.mkdtemp(prefix="incpandas-quickstart-")
+atexit.register(shutil.rmtree, work, ignore_errors=True)   # clean up the temp folder on exit
 os.chdir(work)
 os.environ["INCPANDAS_CACHE"] = os.path.join(work, "cache")
 os.environ["INCPANDAS_LOG"] = "1"      # print "processed N new rows, skipped M" after each run

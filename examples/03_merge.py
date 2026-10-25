@@ -6,13 +6,16 @@ last_run() reports what each plan node did, so you can see which case you got.
 
     python examples/03_merge.py
 """
+import atexit
 import os
+import shutil
 import tempfile
 
 import numpy as np
 import pandas
 
 work = tempfile.mkdtemp(prefix="incpandas-merge-")
+atexit.register(shutil.rmtree, work, ignore_errors=True)   # clean up the temp folder on exit
 os.chdir(work)
 os.environ["INCPANDAS_CACHE"] = os.path.join(work, "cache")
 os.environ["INCPANDAS_LOG"] = "1"

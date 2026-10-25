@@ -7,13 +7,16 @@ Part 3 prints explain(), the text view of the plan: [+] incremental, [x] falls b
 
     python examples/04_fallback_and_strict.py
 """
+import atexit
 import os
+import shutil
 import tempfile
 
 import numpy as np
 import pandas
 
 work = tempfile.mkdtemp(prefix="incpandas-fallback-")
+atexit.register(shutil.rmtree, work, ignore_errors=True)   # clean up the temp folder on exit
 os.chdir(work)
 os.environ["INCPANDAS_CACHE"] = os.path.join(work, "cache")
 

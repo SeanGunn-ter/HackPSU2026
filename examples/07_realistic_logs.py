@@ -9,7 +9,9 @@ endpoint. Appending new log lines only processes the new lines.
     python examples/07_realistic_logs.py --rows 1000000 --append 2000
 """
 import argparse
+import atexit
 import os
+import shutil
 import tempfile
 import time
 
@@ -22,6 +24,7 @@ ap.add_argument("--append", type=int, default=2_000, help="new log lines to appe
 args = ap.parse_args()
 
 work = tempfile.mkdtemp(prefix="incpandas-logs-")
+atexit.register(shutil.rmtree, work, ignore_errors=True)   # clean up the temp folder on exit
 os.chdir(work)
 os.environ["INCPANDAS_CACHE"] = os.path.join(work, "cache")
 os.environ["INCPANDAS_LOG"] = "1"

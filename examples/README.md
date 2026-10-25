@@ -1,6 +1,6 @@
 # Examples
 
-Every script makes its own data in a temporary folder, needs only `pandas`, `numpy` and incpandas
+Every script makes its own data in a temporary folder (deleted when it exits), needs only `pandas`, `numpy` and incpandas
 (`pip install -e .` from the repository root), and runs in under about 30 seconds with its defaults.
 Each prints `INCPANDAS_LOG` lines such as `incpandas: processed 1,000 new rows, skipped 200,000 (4 incremental)`.
 

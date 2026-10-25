@@ -6,13 +6,16 @@ did (INCPANDAS_LOG=1) and checks the result against plain pandas.
 
     python examples/05_edits_and_safety.py
 """
+import atexit
 import os
+import shutil
 import tempfile
 
 import numpy as np
 import pandas
 
 work = tempfile.mkdtemp(prefix="incpandas-safety-")
+atexit.register(shutil.rmtree, work, ignore_errors=True)   # clean up the temp folder on exit
 os.chdir(work)
 os.environ["INCPANDAS_CACHE"] = os.path.join(work, "cache")
 os.environ["INCPANDAS_LOG"] = "1"
