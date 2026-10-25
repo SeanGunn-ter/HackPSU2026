@@ -1,0 +1,5 @@
+sales.csv: 20,000,000 rows, 198.5 MB
+scenario                        pandas   incpandas   speedup
+first run                      10.031s      7.920s      1.3x
+no change                       7.487s      0.004s   1714.3x
+append 1,000 rows               7.614s      0.270s     28.2x
