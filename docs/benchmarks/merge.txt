@@ -1,0 +1,12 @@
+
+merge then groupby (small output)
+  scenario                        pandas  incpandas  speedup
+  first run (5,000,000 rows)      1.872s     1.613s     1.2x
+  append 1,000 rows               1.801s     0.007s   269.6x
+  no change                       1.664s     0.007s   230.3x
+
+merged frame (large output)
+  scenario                        pandas  incpandas  speedup
+  first run (5,000,000 rows)      2.180s     1.411s     1.5x
+  append 1,000 rows               1.477s     0.353s     4.2x
+  no change                       1.425s     0.275s     5.2x
