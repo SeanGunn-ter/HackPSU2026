@@ -58,17 +58,18 @@ def speedup_chart(run1, run2, appended):
             xs = [i + (j - (len(sizes) - 1) / 2) * width for i in range(len(pipes))]
             ys = [cells[(p, rows, appended)]["scenarios"][scen]["speedup"] for p in pipes]
             ax.bar(xs, ys, width * 0.92, color=SIZE_COLOURS[j], label=f"{rows / 1e6:g}M rows")
-            for x, y in zip(xs, ys):
-                ax.text(x, y, f"{y:.1f}", ha="center", va="bottom", fontsize=7)
+            y2 = [cells2[(p, rows, appended)]["scenarios"][scen]["speedup"] for p in pipes] if cells2 else ys
+            for x, y, other in zip(xs, ys, y2):     # label above whichever of bar / dot is higher
+                ax.annotate(f"{y:.1f}", (x, max(y, other)), xytext=(0, 3), textcoords="offset points",
+                            ha="center", va="bottom", fontsize=7, rotation=90)
             if cells2:
-                y2 = [cells2[(p, rows, appended)]["scenarios"][scen]["speedup"] for p in pipes]
                 ax.plot(xs, y2, "o", color="black", ms=3.5, zorder=3,
                         label="second full run" if j == 0 else None)
         ax.axhline(1, color="black", lw=1, ls="--")
         ax.set_title({"first run": "First run (no saved state)", "append": f"Rerun after appending {appended:,} rows",
                       "no change": "Rerun, file unchanged"}[scen])
         ax.set_xticks(range(len(pipes)), [PIPE_LABEL[p] for p in pipes], fontsize=8)
-        ax.set_ylim(bottom=0)
+        ax.set_ylim(0, ax.get_ylim()[1] * 1.12)
         ax.set_ylabel("speedup over plain pandas (x, higher is better)")
         ax.grid(axis="y", alpha=0.25)
         ax.set_axisbelow(True)
@@ -111,11 +112,13 @@ def breakdown_chart(run1, appended):
         ax.set_title(f"{rows / 1e6:g}M rows, +{appended:,} appended")
         ax.grid(axis="x", alpha=0.25)
         ax.set_axisbelow(True)
-    axes[0].legend(loc="lower right", fontsize=7.5, frameon=False)
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="lower center", ncol=len(labels), fontsize=8, frameon=False,
+               bbox_to_anchor=(0.5, 0.04))
     fig.suptitle("Where an incpandas rerun spends its time (each part timed on its own; the rest is the residual)",
                  fontsize=11.5)
     fig.text(0.5, 0.005, caption(run1["environment"]), ha="center", fontsize=8, color="#444")
-    fig.tight_layout(rect=(0, 0.03, 1, 0.94))
+    fig.tight_layout(rect=(0, 0.1, 1, 0.94))
     save(fig, "rerun_time_breakdown")
 
 
