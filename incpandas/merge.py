@@ -5,11 +5,12 @@ order for how="left". So while the right side is unchanged, merging just the app
 rows and appending them equals the full merge. If the right side gains or changes rows, old
 left rows can gain matches and the whole merge is recomputed.
 
-how="inner" is not always left-ordered: before pandas 3.1 (checked on 2.2.3 and 3.0.5), when
+how="inner" is not always left-ordered. Before pandas 3.1 (checked on 2.1, 2.2 and 3.0), when
 the right side has duplicate keys and some left rows have no match, a full merge orders rows
-differently from merging chunks of the left side and appending them. _inner_keeps_left_order()
-probes this once; where it fails, an inner merge is incremental only if the right keys are
-unique, and is otherwise recomputed in full.
+differently from merging chunks of the left side and appending them. On pandas 2.1 this holds
+even when the right keys are unique. Two cached probes check each case on the installed pandas
+(_inner_unique_keeps_order, _inner_dup_keeps_order); where the matching probe fails, an inner
+merge is recomputed in full.
 """
 from __future__ import annotations
 
@@ -23,17 +24,30 @@ from .nodes import Node, StateMismatch, _h
 HOWS = ("inner", "left")
 
 
+def _chunked_matches_full(left, right):
+    """Whether an inner merge on k gives the same row order as merging the left side in two
+    chunks and appending them."""
+    half = len(left) // 2
+    full = left.merge(right, how="inner", on="k")
+    parts = [left.iloc[:half].merge(right, how="inner", on="k"),
+             left.iloc[half:].merge(right, how="inner", on="k")]
+    return full.reset_index(drop=True).equals(pd.concat(parts, ignore_index=True))
+
+
 @functools.lru_cache(maxsize=None)
-def _inner_keeps_left_order():
-    """Whether this pandas gives the same inner-merge row order for a full merge as for the
-    left side merged in chunks and appended (the canned problem case from the docstring)."""
+def _inner_unique_keeps_order():
+    """Probe (a): unique right keys; left keys unsorted, some with no match."""
+    left = pd.DataFrame({"k": list("zxwyqxyz"), "i": range(8)})
+    right = pd.DataFrame({"k": list("yzxn"), "j": range(4)})
+    return _chunked_matches_full(left, right)
+
+
+@functools.lru_cache(maxsize=None)
+def _inner_dup_keeps_order():
+    """Probe (b): duplicate right keys; some left rows have no match."""
     left = pd.DataFrame({"k": list("xyzwyqx"), "i": range(7)})
     right = pd.DataFrame({"k": list("xyyzn"), "j": range(5)})
-    full = left.merge(right, how="inner", on="k")
-    parts = [left.iloc[:4].merge(right, how="inner", on="k"),
-             left.iloc[4:].merge(right, how="inner", on="k")]
-    chunked = pd.concat(parts, ignore_index=True)
-    return full.reset_index(drop=True).equals(chunked)
+    return _chunked_matches_full(left, right)
 
 
 def plan_merge(lcols, rcols, how, on, suffixes):
@@ -101,10 +115,12 @@ class Merge(Node):
 
     def _order_safe(self, R):
         """False when appending chunk merges could order rows differently from a full merge."""
-        if self.how != "inner" or _inner_keeps_left_order():
+        if self.how != "inner":
             return True
         keys = [self.on] if isinstance(self.on, str) else list(self.on)
-        return not R[keys].duplicated().any()
+        if R[keys].duplicated().any():
+            return _inner_dup_keeps_order()
+        return _inner_unique_keeps_order()
 
     @staticmethod
     def _delta(out, st):

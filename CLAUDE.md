@@ -22,7 +22,7 @@ Tell the other person before changing any of these:
 ## Local setup
 - `py -3.10 -m venv .venv && .venv/Scripts/python.exe -m pip install -e ".[dev]"`, then
   `.venv/Scripts/python.exe -m pytest -q`. CI (`.github/workflows/test.yml`) runs the same
-  command across py3.10/3.12 x pandas 2.1/2.2/3.0.
+  command across py3.10/3.12 x pandas 2.1/2.2/3.0/3.1 (3.0 and 3.1 need py3.11+).
 
 ## Cross-track notes
 Messages between A (core features) and B (infrastructure) go here. Add a dated bullet under
@@ -34,15 +34,6 @@ your own heading; delete it once the other person has acted on it.
   harness wants to compose registered ops over randomly generated schemas, which neither allows.
   B will likely need entries to declare the columns they require and to not mutate their input;
   B will propose the exact shape in the B3 PR before changing anything in that file.
-- 2026-10-24: `INCPANDAS_STRICT=1` now raises `engine.StrictFallback` from `engine.log_fallback`
-  and from `Ctx.note(..., "fallback", ...)`, so every fallback path in your files reports through
-  it for free -- no change needed on your side, just keep routing fallbacks through those two.
-  When convenient, please add `StrictFallback` to `__all__` in `__init__.py` (your file) so users
-  can write `except pd.StrictFallback`; until then it is `incpandas.engine.StrictFallback`.
-- 2026-10-24: your inner-merge order fix is verified green on pandas 2.1.4, 2.2.3, 2.3.3, 3.0.6
-  and 3.1.0 (959 passed on each of 2.3.3 and 3.1.0 locally). Note `_inner_keeps_left_order()`
-  returns True *only* on pandas 3.1, so the fully incremental inner-merge branch runs on no
-  other version; CI now includes a 3.1 row so both sides of that branch are covered.
 
 - 2026-10-24: the suite was 7 minutes; `pyproject.toml` now turns on `-n auto`, which brings
   the whole thing to ~40s, so `python -m pytest -q` still means everything and stays the merge
@@ -68,13 +59,10 @@ your own heading; delete it once the other person has acted on it.
   same reason. `Ctx.full()` is unchanged from the outside; `Ctx.__init__` takes the plan sig as
   a second argument now (it names the chunk files), which is the only signature change.
   Row-wise appends went 429ms -> 334ms at 5M rows, A/B'd against the old engine.
-- 2026-10-24: `INCPANDAS_QUICK_CHECK=1` (off by default) skips reading the whole CSV and hashes
-  only the last 64 KiB before the append. Worth ~2x on a rerun, but it cannot see a same-length
-  edit further back than that, so it stays opt-in -- CLAUDE.md says never return a wrong result,
-  and defaulting it on would quietly break that. Worth knowing: the whole mutation fuzz suite
-  passes with it on, because those CSVs are smaller than 64 KiB and the tail hash covers them
-  entirely. The fuzzer going green is not evidence this is safe at scale;
-  `tests/test_quick_check.py` has the one test that actually exercises the hole.
-
 ### From A to B
-- (none yet)
+- 2026-10-24: engine.py `run()` now holds the "incremental run failed" warning and emits it only
+  if the from-scratch retry succeeds (A edited it, with tests in `tests/test_engine_log_strict.py`).
+  Still open: add pandas 2.3.* to the CI matrix if wanted.
+  B: merged and green, thanks. On 2.3.*: the matrix runs 2.1/2.2/3.0/3.1 and the local dev venv
+  is 2.3.3, so 2.3 is covered on every local run but not in CI. Happy to add a sixth job -- say
+  the word, it is one line.

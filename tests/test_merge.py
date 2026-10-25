@@ -45,15 +45,15 @@ def merge_note(lazy):
     return engine.last_run()[lazy._node.sig]
 
 
-def keeps_order():
-    from incpandas.merge import _inner_keeps_left_order
-    return _inner_keeps_left_order()
+def keeps_order(dup_right=True):
+    from incpandas.merge import _inner_dup_keeps_order, _inner_unique_keeps_order
+    return _inner_dup_keeps_order() if dup_right else _inner_unique_keeps_order()
 
 
 def assert_delta(lazy, how, n, dup_right=True):
     """Expect the merge to have processed just n new rows. An inner merge against duplicate
     right keys is recomputed in full on pandas versions that order it differently (merge.py)."""
-    if how == "inner" and dup_right and not keeps_order():
+    if how == "inner" and not keeps_order(dup_right):
         assert merge_note(lazy)[0] == "full"
     else:
         assert merge_note(lazy) == ("incremental", n)
@@ -81,7 +81,7 @@ def test_left_append_is_incremental_and_exact(how, shape):
     write("d.csv", LEFT_HEADER, LEFT2)                     # new rows on the left
     lazy, got = run(make)
     assert_delta(lazy, how, len(LEFT2), dup)                    # only the delta was processed
-    if how == "left" or keeps_order() or not dup:
+    if how == "left" or keeps_order(dup):
         assert {m for m, _ in engine.last_run().values()} == {"incremental"}
     assert isinstance(got.index, (plain.RangeIndex, plain.Index)) and list(got.index) == list(range(len(got)))
     write("d.csv", LEFT_HEADER, [("y", 1, 0.5)] * 3)       # and again
@@ -304,15 +304,26 @@ PROBE_LEFT = [(k, i, float(i)) for i, k in enumerate("xyzwyqx")]
 PROBE_RIGHT = [(k, i, "p") for i, k in enumerate("xyyzn")]
 
 
+def _plain_chunked_matches_full(l, r):
+    full = l.merge(r, on="k")
+    h = len(l) // 2
+    chunked = plain.concat([l.iloc[:h].merge(r, on="k"), l.iloc[h:].merge(r, on="k")],
+                           ignore_index=True)
+    return full.reset_index(drop=True).equals(chunked)
+
+
 def test_inner_order_probe_matches_plain_pandas_example():
-    from incpandas.merge import _inner_keeps_left_order
+    from incpandas.merge import _inner_dup_keeps_order
     l = plain.DataFrame({"k": list("xyzwyqx"), "i": range(7)})
     r = plain.DataFrame({"k": list("xyyzn"), "j": range(5)})
-    full = l.merge(r, on="k")
-    chunked = plain.concat([l.iloc[:4].merge(r, on="k"), l.iloc[4:].merge(r, on="k")],
-                           ignore_index=True)
-    same_order = full.reset_index(drop=True).equals(chunked)
-    assert _inner_keeps_left_order() is same_order
+    assert _inner_dup_keeps_order() is _plain_chunked_matches_full(l, r)
+
+
+def test_inner_order_probe_unique_keys_matches_plain_pandas_example():
+    from incpandas.merge import _inner_unique_keeps_order
+    l = plain.DataFrame({"k": list("zxwyqxyz"), "i": range(8)})
+    r = plain.DataFrame({"k": list("yzxn"), "j": range(4)})
+    assert _inner_unique_keeps_order() is _plain_chunked_matches_full(l, r)
 
 
 @pytest.mark.parametrize("how", HOWS)
@@ -322,16 +333,18 @@ def test_incremental_merge_equals_pandas_for_order_problem_case(how):
     run(make)
     write("d.csv", LEFT_HEADER, PROBE_LEFT[4:])           # appended left rows
     lazy, _ = run(make)                                    # run() asserts equality with pandas
-    from incpandas.merge import _inner_keeps_left_order
     assert_delta(lazy, how, 3)                             # inner + duplicate right keys: full
     write("d.csv", LEFT_HEADER, [("y", 9, 9.0), ("n", 10, 10.0), ("x", 11, 11.0)])
     run(make)
 
 
-def test_inner_merge_with_unique_right_keys_stays_incremental():
+def test_inner_merge_with_unique_right_keys_is_incremental_only_if_probe_passes():
     make = lambda m, d, r: d.merge(r, on="k")
     left(PROBE_LEFT[:4]), right([("x", 1, "a"), ("y", 2, "b"), ("z", 3, "c"), ("n", 4, "d")])
     run(make)
     write("d.csv", LEFT_HEADER, PROBE_LEFT[4:])
     lazy, _ = run(make)
-    assert merge_note(lazy) == ("incremental", 3)
+    if keeps_order(dup_right=False):
+        assert merge_note(lazy) == ("incremental", 3)
+    else:
+        assert merge_note(lazy)[0] == "full"

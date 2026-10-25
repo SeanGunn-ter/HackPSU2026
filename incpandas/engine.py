@@ -198,6 +198,7 @@ def summary(ctx):
 def run(sig, fn):
     """Run `fn(ctx)` incrementally against the state for `sig`; retry from scratch on trouble."""
     state = _load(sig)
+    failed = None            # held until the from-scratch retry shows the failure was ours
     for st in ([state, None] if state is not None else [None]):
         ctx = Ctx(st, sig)
         try:
@@ -206,8 +207,10 @@ def run(sig, fn):
             if st is None or isinstance(e, StrictFallback):
                 raise
             if not isinstance(e, StateMismatch):
-                warnings.warn(f"incpandas: incremental run failed ({e!r}); recomputing from scratch")
+                failed = e
             continue
+        if failed is not None:   # the retry succeeded, so the error came from the incremental path
+            warnings.warn(f"incpandas: incremental run failed ({failed!r}); recomputed from scratch")
         if st is None or ctx.changed:
             try:
                 _save(sig, ctx)
