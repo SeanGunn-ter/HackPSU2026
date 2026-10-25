@@ -25,6 +25,7 @@ import json
 import os
 import pickle
 import platform
+import shutil
 import statistics
 import sys
 import tempfile
@@ -323,17 +324,24 @@ def main(argv=None):
     print(f"python {env['python']}  pandas {env['pandas']}  numpy {env['numpy']}  "
           f"{env['cpus']} cpus\n{env['platform']}")
 
-    results = []
+    home, results = os.getcwd(), []
     for rows in sizes:
         for appended in appends:
             for name in names:
+                # A cell writes a CSV and its saved state, which at the larger sizes is
+                # hundreds of MB, so each one gets a fresh directory and gives it back.
                 work = tempfile.mkdtemp(prefix="incpandas-bench-")
-                os.chdir(work)
-                os.environ["INCPANDAS_CACHE"] = os.path.join(work, ".cache")
-                import incpandas                     # imported after the cache env var is set
-                cell = run_cell(name, rows, appended, args.repeats, args.cold_repeats, incpandas)
-                report(cell)
-                results.append(cell)
+                try:
+                    os.chdir(work)
+                    os.environ["INCPANDAS_CACHE"] = os.path.join(work, ".cache")
+                    import incpandas                 # imported after the cache env var is set
+                    cell = run_cell(name, rows, appended, args.repeats, args.cold_repeats,
+                                    incpandas)
+                    report(cell)
+                    results.append(cell)
+                finally:
+                    os.chdir(home)                   # Windows will not remove the cwd
+                    shutil.rmtree(work, ignore_errors=True)
 
     if out_path:
         with open(out_path, "w", encoding="utf-8") as f:

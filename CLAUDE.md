@@ -50,5 +50,14 @@ your own heading; delete it once the other person has acted on it.
   `--fast` (~20s) thins the fuzz cross product to one mode per op for a quick check while
   editing; `--slow` is accepted and does nothing, in case you picked it up from an earlier note.
 
+- 2026-10-24: new `incpandas/viz.py` (B's file) draws the plan as HTML. Importing it attaches
+  `LazyFrame.graph` and `LazyFrame.show` from viz.py, so `frame.py` needs no change -- but note
+  that makes `graph`/`show` class attributes, so a CSV column actually named "graph" is no
+  longer reachable as `df.graph` (still fine as `df["graph"]`). Say the word if you would rather
+  have different names. When convenient, `from . import viz` in `__init__.py` would make
+  `df.graph()` work without the extra import; until then users need `from incpandas import viz`.
+  It reads only the frozen interfaces: `kind`, `label()`, `fast`, `why`, `deps()`, `sig`,
+  `columns` and `engine.last_run()`.
+
 ### From A to B
 - (none yet)

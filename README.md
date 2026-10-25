@@ -13,26 +13,30 @@ print(df.groupby("region").agg(total=("revenue", "sum"), orders=("qty", "count")
 ```
 
 `python examples/demo.py` shows a rerun after an append. `python examples/benchmark.py` compares against plain
-pandas across five pipelines, three scenarios each, with every result asserted equal to pandas. Medians of 5
-repeats, 2M rows, +1,000 appended, python 3.10 / pandas 2.3.3 on one (busy) laptop — treat these as the shape of
-the result, not as precise figures, and rerun it on your own machine:
+pandas across five pipelines and three scenarios each, with every result asserted equal to pandas. Speedup on a
+rerun after appending 1,000 rows, medians of 7 repeats, python 3.10 / pandas 2.3.3 on one laptop:
 
-| pipeline | first run | append 1,000 | no change |
+| pipeline | 500k rows | 2M rows | 5M rows |
 |---|---|---|---|
-| `groupby` agg | 1.0x | **11.2x** | 20.3x |
-| `merge` + groupby | 1.0x | **11.9x** | 16.9x |
-| `(df.a * df.b).sum()` | 1.0x | **8.5x** | 16.1x |
-| `df.a.sum()` | 1.0x | **7.5x** | 14.1x |
-| row-wise filter (large output) | 0.9x | **3.2x** | 7.2x |
+| `merge` + groupby | 4.2x | 8.7x | **13.2x** |
+| `groupby` agg | 3.1x | 7.0x | **10.9x** |
+| `df.a.sum()` | 3.3x | 5.7x | **9.1x** |
+| `(df.a * df.b).sum()` | 2.6x | 5.5x | **8.3x** |
+| row-wise filter (large output) | 2.5x | 2.9x | **2.8x** |
 
-Two things worth being straight about. The first run is never faster — incpandas does pandas' work and then saves
-state, so the win only starts on the rerun. And the append column is the one that matters: an earlier version of
-this table reported ~20x for appends, but it was repeating a run without appending again, which measures the
-no-change path. Appending is strictly more work than not appending.
+The speedup grows with the file because incpandas' work depends on what was appended, not on what is already
+there — except for the row-wise row, which stays flat, and the reason is in the breakdown below. Reruns with the
+file **unchanged** are faster again (9-21x). A **first** run is never faster (0.8-1.0x): incpandas does pandas'
+work and then saves state, so the win starts on the second run.
 
-`--json results.json` writes the full results, including a breakdown of where a rerun's time actually goes. On the
-row-wise pipeline that breakdown says ~58% is loading and rewriting the 31 MB of saved output, and on the cheaper
-pipelines the whole-file read and hash is the largest single part — which is where the remaining speedup is.
+`--json results.json` writes everything, including where a rerun's time actually goes. At 5M rows:
+
+* on the four small-output pipelines, **47-58% of a rerun is reading and SHA-256-ing the whole 55 MB file** just
+  to prove it only grew. Cheap change detection would roughly double these numbers.
+* the row-wise pipeline spends **73% loading and rewriting its 77 MB of saved output**. That cost scales with the
+  data, which is exactly why its speedup does not improve with file size.
+
+Both are known, fixable, and measured rather than guessed — see Status vs scope.
 
 ## How it works
 1. `read_csv`, column math, filters, column selection and `groupby` are recorded into a plan (DAG) (`incpandas/nodes.py`) rather than executed.
@@ -52,6 +56,22 @@ pipelines the whole-file read and hash is the largest single part — which is w
 * Unsupported aggregation/dtype (e.g. `.sum()` over string columns, `median`, `size`) or expressions mixing in concrete pandas values / other frames -> that node runs in pandas on the full data.
 * Any other DataFrame/Series method (`sort_values`, `merge`, `.sum()` on a column, `.loc[...] =`, `inplace=True`, ...) materialises the frame and runs real pandas. Mutations are kept.
 * `df.explain()` shows the plan: `[+]` incremental, `[x]` fallback, plus rows processed on the last run.
+
+## Seeing the plan
+`viz.graph()` draws the plan as a self-contained HTML page: green nodes ran incrementally, blue ran over
+everything, red fell back to pandas, each labelled with what it did on the last run and why if it fell back.
+The page embeds its own CSS and SVG and loads nothing over the network, so it opens offline from a `file://` URL.
+
+```python
+from incpandas import viz
+
+out = df[df.revenue > 20].groupby("region")[["revenue"]].sum()
+out.to_pandas()                      # run it first, so the graph has a last run to show
+viz.graph(out, "plan.html")          # or out.graph("plan.html"), or viz.show(out) to open it
+```
+
+Importing `incpandas.viz` attaches `.graph()` and `.show()` to lazy frames. Hovering a node shows its full
+label and output columns.
 
 ## Checking correctness
 * `result.verify()` / `incpandas.check(result)`: replays the plan with plain pandas from scratch and asserts equality.
@@ -75,7 +95,10 @@ pipelines the whole-file read and hash is the largest single part — which is w
 
 ## Status vs scope
 MVP done: append detection, column math + filters, groupby sum/count/mean, fallback, persistent state, correctness check. Also done: min/max, text plan view.
-Not done: graph visualisation (text `explain()` only), edited/deleted rows via key column.
+Also done: `merge` with new rows on the left, the plan graph (`viz.graph()`).
+Not done: edited/deleted rows via a key column; cheap change detection (a rerun still hashes the whole file,
+about half of its time at 5M rows); saving only new rows instead of rewriting the whole saved output (73% of a
+row-wise rerun).
 
 Known limits: state stores full outputs (disk/RAM scale with data); a file whose header contains quotes is always fully re-read; the whole file is read once per run to hash it (I/O only, no parsing).
 
