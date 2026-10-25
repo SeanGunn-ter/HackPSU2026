@@ -31,12 +31,26 @@ work and then saves state, so the win starts on the second run.
 
 `--json results.json` writes everything, including where a rerun's time actually goes. At 5M rows:
 
-* on the four small-output pipelines, **47-58% of a rerun is reading and SHA-256-ing the whole 55 MB file** just
-  to prove it only grew. Cheap change detection would roughly double these numbers.
-* the row-wise pipeline spends **73% loading and rewriting its 77 MB of saved output**. That cost scales with the
-  data, which is exactly why its speedup does not improve with file size.
+* on the four small-output pipelines, **47-58% of a rerun was reading and SHA-256-ing the whole 55 MB file** just
+  to prove it only grew. `INCPANDAS_QUICK_CHECK=1` skips that (see below) and roughly halves those reruns.
+* the row-wise pipeline spent **73% loading and rewriting its 77 MB of saved output**. The rewrite is gone: the
+  saved output is now a list of chunks and an append writes only the appended rows. The *load* remains, because
+  the whole output has to be in hand to be returned, so row-wise improves but stays the weakest case.
 
-Both are known, fixable, and measured rather than guessed — see Status vs scope.
+With both, at 5M rows: groupby 22x, `df.a.sum()` 25x, `merge` 27x, row-wise 4.2x.
+
+## Faster change detection (opt-in)
+By default a rerun reads the whole CSV and re-hashes the bytes it saw last time, so **any** edit, deletion or
+truncation anywhere is caught exactly. That read and hash is about half of a rerun on a 55 MB file.
+
+`INCPANDAS_QUICK_CHECK=1` instead `stat()`s the file and hashes only the last 64 KiB of the previously seen
+bytes. Appending then costs the same whatever the file size: at 5M rows a groupby rerun goes from 136ms to 68ms.
+
+The trade-off, stated plainly: **a same-length edit to the old bytes more than 64 KiB from the end is not
+noticed**, and the result is then stale. An edit that changes the file's length shifts every later byte and is
+caught; a file that shrank or was rewritten without changing size falls back to the exact check. Appends, the
+case incpandas exists for, are exact either way. Leave it off if anything rewrites your CSV in place; turn it on
+for an append-only log. `verify()` and `INCPANDAS_VERIFY=1` catch the difference.
 
 ## How it works
 1. `read_csv`, column math, filters, column selection and `groupby` are recorded into a plan (DAG) (`incpandas/nodes.py`) rather than executed.

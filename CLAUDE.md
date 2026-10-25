@@ -59,5 +59,22 @@ your own heading; delete it once the other person has acted on it.
   It reads only the frozen interfaces: `kind`, `label()`, `fast`, `why`, `deps()`, `sig`,
   `columns` and `engine.last_run()`.
 
+- 2026-10-24: B5 landed, both halves, and the state format changed -- `engine.VERSION` is now 2
+  so old caches just recompute. A node's saved output is no longer one blob in the index
+  pickle: it is a list of `.chunk` files that the pickle names, an append writes only the new
+  rows, and after 16 of them it compacts back to one. The index is still the only thing
+  replaced atomically and is written last, so a crash leaves unreferenced chunks, never an
+  index pointing at a chunk that isn't there. Chunk sequence numbers are never reused, for the
+  same reason. `Ctx.full()` is unchanged from the outside; `Ctx.__init__` takes the plan sig as
+  a second argument now (it names the chunk files), which is the only signature change.
+  Row-wise appends went 429ms -> 334ms at 5M rows, A/B'd against the old engine.
+- 2026-10-24: `INCPANDAS_QUICK_CHECK=1` (off by default) skips reading the whole CSV and hashes
+  only the last 64 KiB before the append. Worth ~2x on a rerun, but it cannot see a same-length
+  edit further back than that, so it stays opt-in -- CLAUDE.md says never return a wrong result,
+  and defaulting it on would quietly break that. Worth knowing: the whole mutation fuzz suite
+  passes with it on, because those CSVs are smaller than 64 KiB and the tail hash covers them
+  entirely. The fuzzer going green is not evidence this is safe at scale;
+  `tests/test_quick_check.py` has the one test that actually exercises the hole.
+
 ### From A to B
 - (none yet)

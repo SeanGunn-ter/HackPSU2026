@@ -174,15 +174,17 @@ def components(cache, appended_bytes):
                 saved.append(pickle.load(f))
     out["load_saved_state"] = _median_of(load_state)
 
-    # The engine rewrites the whole state pickle whenever anything changed, so an append pays
-    # to write it as well as read it. This is what B5(b) -- saving only the new rows -- is for.
+    # What rewriting the whole saved output would cost. The engine no longer does that on an
+    # append -- it writes one chunk -- so read this as the cost that chunking avoids, not as
+    # part of the rerun below. Compaction pays it once every MAX_CHUNKS runs.
     def write_state():
         for i, obj in enumerate(saved):
             tmp = f"bench-state-{i}.tmp"
             with open(tmp, "wb") as f:
                 pickle.dump(obj, f, protocol=pickle.HIGHEST_PROTOCOL)
             os.remove(tmp)
-    out["write_saved_state"] = _median_of(write_state)
+    out["rewrite_all_state"] = _median_of(write_state)
+    out["state_files"] = len(paths)
     return out
 
 
@@ -273,8 +275,7 @@ def report(cell):
               f" {s['speedup']:7.1f}x")
     c = cell["components"]
     total = cell["scenarios"]["append"]["incpandas"]["median"]
-    parts = ("read_header", "read_and_hash", "parse_appended_tail", "load_saved_state",
-             "write_saved_state")
+    parts = ("read_header", "read_and_hash", "parse_appended_tail", "load_saved_state")
     rest = total - sum(c[k] for k in parts)
     spent = "\n    ".join(f"{k.replace('_', ' '):21s} {c[k] * 1e3:7.1f}ms"
                           f" {100 * c[k] / total:5.1f}%" for k in parts)
@@ -282,7 +283,9 @@ def report(cell):
     print(f"    {'everything else':21s} {rest * 1e3:7.1f}ms {100 * rest / total:5.1f}%")
     size = c["state_bytes"]
     print(f"  saved state on disk: "
-          f"{f'{size / 1e6:.1f} MB' if size >= 1e6 else f'{size / 1e3:.0f} KB'}")
+          f"{f'{size / 1e6:.1f} MB' if size >= 1e6 else f'{size / 1e3:.0f} KB'}"
+          f" in {c['state_files']} files; rewriting all of it would cost "
+          f"{c['rewrite_all_state'] * 1e3:.0f}ms, which an append no longer pays")
     if cell["log"]:
         print(f"  {cell['log']}")
 

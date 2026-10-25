@@ -1,7 +1,10 @@
 """Executes a plan against persisted state.
 
-State lives in one pickle per plan fingerprint (`<cache_dir>/<sig>.pkl`) and is written
-atomically, so a crash can't leave sources and aggregates out of sync. If anything about
+State lives in one pickle per plan fingerprint (`<cache_dir>/<sig>.pkl`), with each node's
+saved output beside it as a list of `.chunk` files that the pickle names. An append writes
+one small chunk rather than rewriting the whole output; after MAX_CHUNKS of them the output
+is written back as a single chunk. The index pickle is written last and atomically, so a
+crash can't leave sources and aggregates out of sync. If anything about
 the saved state looks off, or the incremental path raises, we recompute from scratch.
 
 Two environment variables make a run observable:
@@ -20,7 +23,8 @@ import pandas as pd
 
 from .nodes import StateMismatch
 
-VERSION = 1
+VERSION = 2          # state layout; a bump just makes old caches recompute
+MAX_CHUNKS = 16      # how many appends pile up before the output is rewritten as one
 log = logging.getLogger("incpandas")
 
 fallback_log: list = []   # names of pandas calls that ran eagerly in real pandas
@@ -52,12 +56,14 @@ def log_fallback(what):
 
 
 class Ctx:
-    def __init__(self, state):
+    def __init__(self, state, plan=""):
         self._old = state or {"run": 0, "nodes": {}, "full": {}}
+        self.plan = plan
         self.prev_run = self._old["run"]
         self.run_id = self.prev_run + 1
         self.new_nodes, self.new_full = {}, {}
         self._stream, self._full, self.notes = {}, {}, {}
+        self.pending = []        # (filename, frame) chunks this run still has to write
         self.changed = False
 
     # per-node persisted state, only trusted if written by the immediately preceding run
@@ -84,24 +90,62 @@ class Ctx:
         return self._stream[node.sig]
 
     def full(self, node):
-        """The node's complete output: previous full output + this run's delta."""
+        """The node's complete output: previous full output + this run's delta.
+
+        The output is kept on disk as a list of chunks rather than one blob, so an append
+        writes only the appended rows instead of rewriting everything. Reading still costs
+        what it always did -- the whole output has to be loaded to be returned -- so this
+        saves the rewrite, not the read.
+        """
         if node.sig in self._full:
             return self._full[node.sig]
         d, reset = self.stream(node)
+        ent = self._old["full"].get(node.sig)
         if reset:
-            out = d
+            # Carry the sequence forward even though the chunks are being replaced: reusing a
+            # name would overwrite a chunk the *previous* index still points at, and a crash
+            # before the new index lands would leave that index describing the wrong bytes.
+            out, chunks, seq = d, [], (ent["seq"] if ent else 0)
         else:
-            ent = self._old["full"].get(node.sig)
-            if ent is None or ent[1] != self.prev_run:
+            if ent is None or ent["run"] != self.prev_run:
                 raise StateMismatch(node.label())
-            out = ent[0] if len(d) == 0 else pd.concat([ent[0], d])
-        self.new_full[node.sig] = (out, self.run_id)
+            parts = [_read_chunk(name) for name in ent["chunks"]]
+            chunks, seq = list(ent["chunks"]), ent["seq"]
+
+            out = parts[0] if len(parts) == 1 and len(d) == 0 else pd.concat(parts + [d])
+
+        if reset or len(d):
+            if reset or len(chunks) >= MAX_CHUNKS:
+                chunks = []                      # compact: one chunk holding everything
+            new, seq = self._chunk_name(node, seq), seq + 1
+            self.pending.append((new, out if not chunks else d))
+            chunks.append(new)
+        self.new_full[node.sig] = {"chunks": chunks, "seq": seq, "run": self.run_id}
         self._full[node.sig] = out
         return out
+
+    def _chunk_name(self, node, seq):
+        return f"{self.plan[:16]}-{node.sig[:12]}-{seq}.chunk"
 
 
 def _path(sig):
     return os.path.join(cache_dir(), sig[:32] + ".pkl")
+
+
+def _chunk_path(name):
+    return os.path.join(cache_dir(), name)
+
+
+def _read_chunk(name):
+    with open(_chunk_path(name), "rb") as f:
+        return pickle.load(f)
+
+
+def _write(path, obj):
+    tmp = f"{path}.{os.getpid()}.tmp"
+    with open(tmp, "wb") as f:
+        pickle.dump(obj, f, protocol=pickle.HIGHEST_PROTOCOL)
+    os.replace(tmp, path)
 
 
 def _load(sig):
@@ -114,13 +158,25 @@ def _load(sig):
 
 
 def _save(sig, ctx):
+    """Chunks first, then the index that names them, then drop what it no longer names.
+
+    The index file is the only thing that is replaced atomically, and it is written last, so
+    a crash leaves either the previous run intact or unreferenced chunks -- never an index
+    pointing at a chunk that isn't there.
+    """
     os.makedirs(cache_dir(), exist_ok=True)
-    path = _path(sig)
-    tmp = f"{path}.{os.getpid()}.tmp"
-    with open(tmp, "wb") as f:
-        pickle.dump({"v": VERSION, "run": ctx.run_id, "nodes": ctx.new_nodes, "full": ctx.new_full},
-                    f, protocol=pickle.HIGHEST_PROTOCOL)
-    os.replace(tmp, path)
+    for name, frame in ctx.pending:
+        _write(_chunk_path(name), frame)
+    _write(_path(sig), {"v": VERSION, "run": ctx.run_id, "nodes": ctx.new_nodes,
+                        "full": ctx.new_full})
+
+    keep = {n for ent in ctx.new_full.values() for n in ent["chunks"]}
+    stale = {n for ent in ctx._old["full"].values() for n in ent["chunks"]} - keep
+    for name in stale:
+        try:
+            os.remove(_chunk_path(name))
+        except OSError:
+            pass                     # a leftover chunk costs disk, never correctness
 
 
 def summary(ctx):
@@ -143,7 +199,7 @@ def run(sig, fn):
     """Run `fn(ctx)` incrementally against the state for `sig`; retry from scratch on trouble."""
     state = _load(sig)
     for st in ([state, None] if state is not None else [None]):
-        ctx = Ctx(st)
+        ctx = Ctx(st, sig)
         try:
             out = fn(ctx)
         except Exception as e:
