@@ -12,19 +12,41 @@ df = df[df.revenue > 20]
 print(df.groupby("region").agg(total=("revenue", "sum"), orders=("qty", "count")))
 ```
 
-`python examples/demo.py` shows a rerun after an append. `python examples/benchmark.py` compares against plain pandas
-(2M rows, +1,000 appended, best of 3, results asserted equal; one machine, pandas 3.0.5):
+`python examples/demo.py` shows a rerun after an append. `python examples/benchmark.py` compares against plain
+pandas across five pipelines and three scenarios each, with every result asserted equal to pandas. Speedup on a
+rerun after appending 1,000 rows, medians of 7 repeats, python 3.10 / pandas 2.3.3 on one laptop:
 
-| scenario | pandas | incpandas | speedup |
+| pipeline | 500k rows | 2M rows | 5M rows |
 |---|---|---|---|
-| groupby: first run | 0.78s | 0.66s | 1.2x |
-| groupby: append 1,000 rows | 0.47s | 0.024s | ~20x |
-| groupby: no change | 0.49s | 0.025s | ~20x |
-| row-wise (filter) result: first run | 0.37s | 0.35s | 1.1x |
-| row-wise result: append 1,000 rows | 0.25s | 0.049s | ~5x |
-| row-wise result: no change | 0.28s | 0.041s | ~7x |
+| `merge` + groupby | 4.2x | 8.7x | **13.2x** |
+| `groupby` agg | 3.1x | 7.0x | **10.9x** |
+| `df.a.sum()` | 3.3x | 5.7x | **9.1x** |
+| `(df.a * df.b).sum()` | 2.6x | 5.5x | **8.3x** |
+| row-wise filter (large output) | 2.5x | 2.9x | **2.8x** |
 
-The row-wise case is slower than groupby because it loads and re-saves the full previous output each time.
+The speedup grows with the file because incpandas' work depends on what was appended, not on what is already
+there — except for the row-wise row, which stays flat, and the reason is in the breakdown below. Reruns with the
+file **unchanged** are faster again (9-21x). A **first** run is never faster (0.8-1.0x): incpandas does pandas'
+work and then saves state, so the win starts on the second run.
+
+`--json results.json` writes everything, including where a rerun's time actually goes. At 5M rows:
+
+* on the four small-output pipelines, **47-58% of a rerun was reading and SHA-256-ing the whole 55 MB file** just
+  to prove it only grew. A rerun where the file has not been touched at all now skips that entirely (below).
+* the row-wise pipeline spent **73% loading and rewriting its 77 MB of saved output**. The rewrite is gone: the
+  saved output is now a list of chunks and an append writes only the appended rows. The *load* remains, because
+  the whole output has to be in hand to be returned, so row-wise improves but stays the weakest case.
+
+## Change detection
+A rerun reads the whole CSV and re-hashes the bytes it saw last time, so **any** edit, deletion or truncation
+anywhere is caught exactly, and anything that is not a clean append rebuilds from scratch.
+
+One shortcut avoids that read: if `stat()` says the size and modification time both match the previous run, the
+file cannot have changed and an empty delta is returned without reading or hashing it. A file that was touched
+but is otherwise identical re-arms the shortcut for next time. `INCPANDAS_CHECK=exact` turns it off.
+
+The shortcut only fires when the file is *unchanged*; a file that grew is still read and verified in full, so an
+append is always exact.
 
 ## How it works
 1. `read_csv`, column math, filters, column selection and `groupby` are recorded into a plan (DAG) (`incpandas/nodes.py`) rather than executed.
@@ -44,6 +66,22 @@ The row-wise case is slower than groupby because it loads and re-saves the full 
 * Unsupported aggregation/dtype (e.g. `.sum()` over string columns, `median`, `size`) or expressions mixing in concrete pandas values / other frames -> that node runs in pandas on the full data.
 * Any other DataFrame/Series method (`sort_values`, `merge`, `.sum()` on a column, `.loc[...] =`, `inplace=True`, ...) materialises the frame and runs real pandas. Mutations are kept.
 * `df.explain()` shows the plan: `[+]` incremental, `[x]` fallback, plus rows processed on the last run.
+
+## Seeing the plan
+`viz.graph()` draws the plan as a self-contained HTML page: green nodes ran incrementally, blue ran over
+everything, red fell back to pandas, each labelled with what it did on the last run and why if it fell back.
+The page embeds its own CSS and SVG and loads nothing over the network, so it opens offline from a `file://` URL.
+
+```python
+from incpandas import viz
+
+out = df[df.revenue > 20].groupby("region")[["revenue"]].sum()
+out.to_pandas()                      # run it first, so the graph has a last run to show
+viz.graph(out, "plan.html")          # or out.graph("plan.html"), or viz.show(out) to open it
+```
+
+Importing `incpandas.viz` attaches `.graph()` and `.show()` to lazy frames. Hovering a node shows its full
+label and output columns.
 
 ## Checking correctness
 * `result.verify()` / `incpandas.check(result)`: replays the plan with plain pandas from scratch and asserts equality.
@@ -67,10 +105,24 @@ The row-wise case is slower than groupby because it loads and re-saves the full 
 
 ## Status vs scope
 MVP done: append detection, column math + filters, groupby sum/count/mean, fallback, persistent state, correctness check. Also done: min/max, text plan view.
-Not done: graph visualisation (text `explain()` only), edited/deleted rows via key column.
+Also done: `merge` with new rows on the left, the plan graph (`viz.graph()`).
+Not done: edited/deleted rows via a key column; cheap change detection (a rerun still hashes the whole file,
+about half of its time at 5M rows); saving only new rows instead of rewriting the whole saved output (73% of a
+row-wise rerun).
 
 Known limits: state stores full outputs (disk/RAM scale with data); a file whose header contains quotes is always fully re-read; the whole file is read once per run to hash it (I/O only, no parsing).
 
+## Running the tests
 ```
-pip install -e .[dev] && pytest
+pip install -e ".[dev]"
+pytest          # everything, ~40s
+pytest --fast   # one mode per operation, ~20s
+pytest -n0      # serially, for readable output while debugging one test
 ```
+The fuzz suite is a cross product of every operation in `tests/fuzz_ops.py` against every
+file-mutation and right-table-mutation mode, and all 963 tests run by default. `--fast` keeps
+one mode per operation, chosen round-robin so every operation and every mode still appears
+but not every pairing (396 tests), and skips anything marked `@pytest.mark.slow`.
+
+CI runs the full suite on every push and pull request, across py3.10/3.12 x pandas
+2.1/2.2/3.0/3.1.

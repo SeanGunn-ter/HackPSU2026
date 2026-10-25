@@ -14,6 +14,10 @@ Tell the other person before changing any of these:
 
 ## Tests
 - Every new operation needs an entry in `tests/fuzz_ops.py` once that file exists.
+- The suite is parallel by default (`-n auto`, from `pyproject.toml`). Use `-n0` to debug one test.
+- `pytest` runs everything (~40s): all 963 tests, the full fuzz cross product. `pytest --fast`
+  (~20s) thins that to one mutation mode per op, round-robin, for a quick check while editing;
+  it is not the merge gate. Adding an op to `OPS` needs no bookkeeping either way.
 
 ## Local setup
 - `py -3.10 -m venv .venv && .venv/Scripts/python.exe -m pip install -e ".[dev]"`, then
@@ -31,7 +35,41 @@ your own heading; delete it once the other person has acted on it.
   B will likely need entries to declare the columns they require and to not mutate their input;
   B will propose the exact shape in the B3 PR before changing anything in that file.
 
+- 2026-10-24: the suite was 7 minutes; `pyproject.toml` now turns on `-n auto`, which brings
+  the whole thing to ~40s, so `python -m pytest -q` still means everything and stays the merge
+  gate -- no change to your habits. Add `-n0` when you want readable output for a single test.
+  `--fast` (~20s) thins the fuzz cross product to one mode per op for a quick check while
+  editing; `--slow` is accepted and does nothing, in case you picked it up from an earlier note.
+
+- 2026-10-24: new `incpandas/viz.py` (B's file) draws the plan as HTML. Importing it attaches
+  `LazyFrame.graph` and `LazyFrame.show` from viz.py, so `frame.py` needs no change -- but note
+  that makes `graph`/`show` class attributes, so a CSV column actually named "graph" is no
+  longer reachable as `df.graph` (still fine as `df["graph"]`). Say the word if you would rather
+  have different names. When convenient, `from . import viz` in `__init__.py` would make
+  `df.graph()` work without the extra import; until then users need `from incpandas import viz`.
+  It reads only the frozen interfaces: `kind`, `label()`, `fast`, `why`, `deps()`, `sig`,
+  `columns` and `engine.last_run()`.
+
+- 2026-10-24: B5 landed, both halves, and the state format changed -- `engine.VERSION` is now 2
+  so old caches just recompute. A node's saved output is no longer one blob in the index
+  pickle: it is a list of `.chunk` files that the pickle names, an append writes only the new
+  rows, and after 16 of them it compacts back to one. The index is still the only thing
+  replaced atomically and is written last, so a crash leaves unreferenced chunks, never an
+  index pointing at a chunk that isn't there. Chunk sequence numbers are never reused, for the
+  same reason. `Ctx.full()` is unchanged from the outside; `Ctx.__init__` takes the plan sig as
+  a second argument now (it names the chunk files), which is the only signature change.
+  Row-wise appends went 429ms -> 334ms at 5M rows, A/B'd against the old engine.
+- 2026-10-24: a pandas 2.1-only bug of mine, for the record, since it is the kind that hides:
+  concatenating an **empty** frame upcasts columns to object on 2.1 (2.2+ does not), so the
+  chunked saved output turned int64 into object on a no-change rerun and 13 merge tests failed
+  on 2.1 only. Fixed by never concatenating an empty delta, which is what the old single-blob
+  code did implicitly. The regression test pins that invariant instead of the symptom, so it
+  fails on every pandas version rather than just the one that shows it.
+
 ### From A to B
 - 2026-10-24: engine.py `run()` now holds the "incremental run failed" warning and emits it only
   if the from-scratch retry succeeds (A edited it, with tests in `tests/test_engine_log_strict.py`).
   Still open: add pandas 2.3.* to the CI matrix if wanted.
+  B: merged and green, thanks. On 2.3.*: the matrix runs 2.1/2.2/3.0/3.1 and the local dev venv
+  is 2.3.3, so 2.3 is covered on every local run but not in CI. Happy to add a sixth job -- say
+  the word, it is one line.
