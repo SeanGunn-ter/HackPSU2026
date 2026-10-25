@@ -1,0 +1,1 @@
+{"cpu_model": "Intel(R) Xeon(R) Processor @ 2.10GHz", "ram_gb": 16, "note": "read by make_charts.py for the chart captions; the harness itself does not record the CPU model"}
